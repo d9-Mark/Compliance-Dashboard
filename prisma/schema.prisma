@@ -21,6 +21,10 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  sentinelOneSiteId String? // SentinelOne site ID
+  ninjaOneOrganizationId String? // Future: NinjaOne org ID  
+  proofpointOrganizationId String? // Future: ProofPoint org ID
+
   // Relationships
   users     User[]
   clients   Client[]
@@ -34,6 +38,7 @@ model Tenant {
   WindowsComplianceRule WindowsComplianceRule[]
 
   @@index([slug])
+  @@index([sentinelOneSiteId])
 }
 
 model Client {
@@ -67,6 +72,8 @@ model Endpoint {
   ipAddress       String?
   macAddress      String?
   lastSeen        DateTime?
+  endpointSources EndpointSource[]
+  sentinelOneSiteId String? // SentinelOne site ID
 
   // Compliance status
   isCompliant     Boolean @default(false)
@@ -154,6 +161,25 @@ model Endpoint {
   @@index([sentinelOneAgentId])
   @@index([ninjaOneDeviceId])
   @@index([lastSeen])
+}
+
+model EndpointSource {
+  id String @id @default(cuid())
+  endpointId String
+  sourceType String // 'SENTINELONE', 'NINJAONE', 'PROOFPOINT'
+  sourceId String // External system ID
+  sourceData Json? // Raw data from source
+  lastSynced DateTime?
+  isPrimary Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  endpoint Endpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, sourceType])
+  @@index([sourceType])
+  @@index([sourceId])
 }
 
 // ============================================================================
