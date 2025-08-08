@@ -13,6 +13,7 @@ import { ZodError } from "zod";
 
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import { type UserRole } from "@prisma/client";
 
 /**
  * 1. CONTEXT
@@ -102,6 +103,119 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 });
 
 /**
+ * Middleware to ensure user is authenticated and add user info to context
+ */
+const authMiddleware = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+
+  // Fetch full user data including tenant and role
+  const user = await ctx.db.user.findUnique({
+    where: { id: ctx.session.user.id },
+    include: {
+      tenant: true,
+    },
+  });
+
+  if (!user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "User not found in database",
+    });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      session: { ...ctx.session, user: ctx.session.user },
+      user,
+    },
+  });
+});
+
+/**
+ * Middleware to ensure user has admin privileges (D9 admin)
+ */
+const adminMiddleware = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+
+  const user = await ctx.db.user.findUnique({
+    where: { id: ctx.session.user.id },
+    include: { tenant: true },
+  });
+
+  if (!user || user.role !== "ADMIN") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Admin access required",
+    });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      session: { ...ctx.session, user: ctx.session.user },
+      user,
+    },
+  });
+});
+
+/**
+ * Middleware to filter data by tenant (for tenant users)
+ */
+const tenantMiddleware = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+
+  const user = await ctx.db.user.findUnique({
+    where: { id: ctx.session.user.id },
+    include: { tenant: true },
+  });
+
+  if (!user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "User not found in database",
+    });
+  }
+
+  // D9 admins can access any tenant data (but should specify tenantId in input)
+  if (user.role === "ADMIN") {
+    return next({
+      ctx: {
+        ...ctx,
+        session: { ...ctx.session, user: ctx.session.user },
+        user,
+        isAdmin: true,
+        tenantId: null, // Admin can access any tenant
+      },
+    });
+  }
+
+  // Regular users can only access their own tenant data
+  if (!user.tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "User not assigned to a tenant",
+    });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      session: { ...ctx.session, user: ctx.session.user },
+      user,
+      isAdmin: false,
+      tenantId: user.tenantId,
+    },
+  });
+});
+
+/**
  * Public (unauthenticated) procedure
  *
  * This is the base piece you use to build new queries and mutations on your tRPC API. It does not
@@ -120,14 +234,63 @@ export const publicProcedure = t.procedure.use(timingMiddleware);
  */
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
-  .use(({ ctx, next }) => {
-    if (!ctx.session?.user) {
-      throw new TRPCError({ code: "UNAUTHORIZED" });
+  .use(authMiddleware);
+
+/**
+ * Admin-only procedure
+ *
+ * Only accessible to D9 admin users. Use this for admin-only operations like
+ * creating new tenants, viewing all tenant data, etc.
+ */
+export const adminProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(adminMiddleware);
+
+/**
+ * Tenant-scoped procedure
+ *
+ * Automatically filters data by the user's tenant. For admin users, they need to
+ * specify tenantId in their input. For regular users, data is automatically
+ * filtered to their tenant.
+ */
+export const tenantProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(tenantMiddleware);
+
+/**
+ * Helper function to get tenant filter for Prisma queries
+ * Use this in your routers to ensure proper tenant isolation
+ */
+export const getTenantFilter = (ctx: {
+  isAdmin: boolean;
+  tenantId: string | null;
+  inputTenantId?: string;
+}) => {
+  // Admin users must specify tenantId in input for tenant-specific queries
+  if (ctx.isAdmin) {
+    if (!ctx.inputTenantId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Admin users must specify tenantId",
+      });
     }
-    return next({
-      ctx: {
-        // infers the `session` as non-nullable
-        session: { ...ctx.session, user: ctx.session.user },
-      },
+    return { tenantId: ctx.inputTenantId };
+  }
+
+  // Regular users are automatically scoped to their tenant
+  if (!ctx.tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "User not assigned to a tenant",
     });
-  });
+  }
+
+  return { tenantId: ctx.tenantId };
+};
+
+/**
+ * Helper function for admin queries that can optionally filter by tenant
+ */
+export const getAdminTenantFilter = (inputTenantId?: string) => {
+  return inputTenantId ? { tenantId: inputTenantId } : {};
+};
