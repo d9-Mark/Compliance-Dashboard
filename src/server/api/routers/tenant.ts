@@ -1,6 +1,4 @@
-// ============================================================================
-// TENANT ROUTER
-// ============================================================================
+// src/server/api/routers/tenant.ts - Enhanced with Windows version tracking
 
 import { TRPCError } from "@trpc/server";
 import z from "zod";
@@ -72,7 +70,7 @@ export const tenantRouter = createTRPCRouter({
     }),
 
   /**
-   * Get tenant overview with stats - admin can specify tenant, users get their own
+   * Get tenant overview with stats - ENHANCED with Windows version data
    */
   getOverview: tenantProcedure
     .input(
@@ -103,7 +101,7 @@ export const tenantRouter = createTRPCRouter({
       }
 
       const tenant = await ctx.db.tenant.findFirst({
-        where: { id: tenantId }, // Use 'id' for tenant table
+        where: { id: tenantId },
         include: {
           clients: {
             include: {
@@ -131,7 +129,7 @@ export const tenantRouter = createTRPCRouter({
       // Get endpoint stats
       const endpointStats = await ctx.db.endpoint.groupBy({
         by: ["isCompliant"],
-        where: { tenantId }, // Use tenantId for endpoint table
+        where: { tenantId },
         _count: {
           id: true,
         },
@@ -139,12 +137,102 @@ export const tenantRouter = createTRPCRouter({
 
       // Get vulnerability stats
       const vulnStats = await ctx.db.endpoint.aggregate({
-        where: { tenantId }, // Use tenantId for endpoint table
+        where: { tenantId },
         _sum: {
           criticalVulns: true,
           highVulns: true,
           mediumVulns: true,
           lowVulns: true,
+        },
+      });
+
+      // NEW: Get Windows version breakdown
+      const windowsVersionStats = await ctx.db.endpoint.groupBy({
+        by: ["operatingSystem", "osVersion"],
+        where: {
+          tenantId,
+          operatingSystem: {
+            contains: "Windows",
+            mode: "insensitive",
+          },
+        },
+        _count: {
+          id: true,
+        },
+        orderBy: {
+          _count: {
+            id: "desc",
+          },
+        },
+      });
+
+      // NEW: Analyze Windows compliance
+      const windowsEndpoints = await ctx.db.endpoint.findMany({
+        where: {
+          tenantId,
+          operatingSystem: {
+            contains: "Windows",
+            mode: "insensitive",
+          },
+        },
+        select: {
+          id: true,
+          operatingSystem: true,
+          osVersion: true,
+          lastSeen: true,
+        },
+      });
+
+      // Define latest Windows versions (this could come from a database table later)
+      const latestWindowsVersions = {
+        "Windows 11": ["10.0.22631", "10.0.22621"], // 23H2, 22H2
+        "Windows 10": ["10.0.19045"], // 22H2 (final version)
+        "Windows Server 2022": ["10.0.20348"],
+        "Windows Server 2019": ["10.0.17763"],
+      };
+
+      // Analyze Windows version compliance
+      let windowsCompliantCount = 0;
+      let windowsOutdatedCount = 0;
+      let windowsUnknownCount = 0;
+
+      const windowsVersionBreakdown = windowsVersionStats.map((stat) => {
+        const isLatest = Object.entries(latestWindowsVersions).some(
+          ([os, versions]) => {
+            return (
+              stat.operatingSystem?.includes(os.split(" ")[1]) &&
+              versions.includes(stat.osVersion || "")
+            );
+          },
+        );
+
+        if (isLatest) {
+          windowsCompliantCount += stat._count.id;
+        } else if (stat.osVersion) {
+          windowsOutdatedCount += stat._count.id;
+        } else {
+          windowsUnknownCount += stat._count.id;
+        }
+
+        return {
+          operatingSystem: stat.operatingSystem,
+          osVersion: stat.osVersion,
+          count: stat._count.id,
+          isLatest,
+          displayName: `${stat.operatingSystem} ${stat.osVersion || "Unknown"}`,
+        };
+      });
+
+      // NEW: Get endpoints that haven't been seen recently
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const staleEndpointsCount = await ctx.db.endpoint.count({
+        where: {
+          tenantId,
+          lastSeen: {
+            lt: thirtyDaysAgo,
+          },
         },
       });
 
@@ -156,6 +244,7 @@ export const tenantRouter = createTRPCRouter({
             compliant: endpointStats.find((s) => s.isCompliant)?._count.id ?? 0,
             nonCompliant:
               endpointStats.find((s) => !s.isCompliant)?._count.id ?? 0,
+            stale: staleEndpointsCount,
           },
           vulnerabilities: {
             critical: vulnStats._sum.criticalVulns ?? 0,
@@ -163,21 +252,29 @@ export const tenantRouter = createTRPCRouter({
             medium: vulnStats._sum.mediumVulns ?? 0,
             low: vulnStats._sum.lowVulns ?? 0,
           },
+          // NEW: Windows-specific stats
+          windows: {
+            total: windowsEndpoints.length,
+            compliant: windowsCompliantCount,
+            outdated: windowsOutdatedCount,
+            unknown: windowsUnknownCount,
+            versions: windowsVersionBreakdown,
+          },
         },
       };
     }),
 
   // ============================================================================
-  // ENDPOINT MANAGEMENT
+  // ENDPOINT MANAGEMENT - ENHANCED with Windows version details
   // ============================================================================
 
   /**
-   * Get endpoints for a tenant
+   * Get endpoints for a tenant - ENHANCED with Windows version grouping
    */
   getEndpoints: tenantProcedure
     .input(
       z.object({
-        tenantId: z.string().optional(), // Only required for admin users
+        tenantId: z.string().optional(),
         clientId: z.string().optional(),
         limit: z.number().min(1).max(100).default(50),
         offset: z.number().min(0).default(0),
@@ -185,6 +282,11 @@ export const tenantRouter = createTRPCRouter({
         complianceFilter: z
           .enum(["all", "compliant", "non-compliant"])
           .default("all"),
+        // NEW: Windows-specific filters
+        windowsFilter: z
+          .enum(["all", "latest", "outdated", "unknown"])
+          .default("all"),
+        osFilter: z.string().optional(), // Filter by specific OS
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -194,7 +296,7 @@ export const tenantRouter = createTRPCRouter({
         inputTenantId: input.tenantId,
       });
 
-      // Build where clause
+      // Build where clause with Windows filtering
       const where: any = {
         ...filter,
         ...(input.clientId && { clientId: input.clientId }),
@@ -207,7 +309,38 @@ export const tenantRouter = createTRPCRouter({
         ...(input.complianceFilter !== "all" && {
           isCompliant: input.complianceFilter === "compliant",
         }),
+        ...(input.osFilter && {
+          operatingSystem: {
+            contains: input.osFilter,
+            mode: "insensitive",
+          },
+        }),
       };
+
+      // Apply Windows version filtering
+      if (input.windowsFilter !== "all") {
+        const latestVersions = [
+          "10.0.22631",
+          "10.0.22621",
+          "10.0.20348",
+          "10.0.19045",
+        ];
+
+        switch (input.windowsFilter) {
+          case "latest":
+            where.osVersion = { in: latestVersions };
+            break;
+          case "outdated":
+            where.AND = [
+              { osVersion: { notIn: latestVersions } },
+              { osVersion: { not: null } },
+            ];
+            break;
+          case "unknown":
+            where.osVersion = null;
+            break;
+        }
+      }
 
       const [endpoints, total] = await Promise.all([
         ctx.db.endpoint.findMany({
@@ -223,28 +356,62 @@ export const tenantRouter = createTRPCRouter({
               },
             },
           },
-          orderBy: { lastSeen: "desc" },
+          orderBy: [{ lastSeen: "desc" }, { hostname: "asc" }],
           take: input.limit,
           skip: input.offset,
         }),
         ctx.db.endpoint.count({ where }),
       ]);
 
+      // NEW: Enhance endpoints with Windows compliance analysis
+      const enhancedEndpoints = endpoints.map((endpoint) => {
+        const latestVersions = [
+          "10.0.22631",
+          "10.0.22621",
+          "10.0.20348",
+          "10.0.19045",
+        ];
+        const isWindowsLatest = endpoint.osVersion
+          ? latestVersions.includes(endpoint.osVersion)
+          : false;
+        const isWindows =
+          endpoint.operatingSystem?.toLowerCase().includes("windows") ?? false;
+
+        // Calculate days since last seen
+        const daysSinceLastSeen = endpoint.lastSeen
+          ? Math.floor(
+              (Date.now() - endpoint.lastSeen.getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : null;
+
+        return {
+          ...endpoint,
+          windows: {
+            isWindows,
+            isLatest: isWindowsLatest,
+            needsUpdate: isWindows && !isWindowsLatest,
+            daysSinceLastSeen,
+            isStale: daysSinceLastSeen !== null && daysSinceLastSeen > 30,
+          },
+        };
+      });
+
       return {
-        endpoints,
+        endpoints: enhancedEndpoints,
         total,
         hasMore: total > input.offset + input.limit,
       };
     }),
 
   /**
-   * Get single endpoint details
+   * Get single endpoint details - ENHANCED with Windows analysis
    */
   getEndpoint: tenantProcedure
     .input(
       z.object({
         endpointId: z.string(),
-        tenantId: z.string().optional(), // Only required for admin users
+        tenantId: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -287,16 +454,107 @@ export const tenantRouter = createTRPCRouter({
     }),
 
   // ============================================================================
-  // CLIENT MANAGEMENT
+  // NEW: Windows-specific queries
   // ============================================================================
 
   /**
-   * Get clients for a tenant
+   * Get Windows version summary for a tenant
    */
+  getWindowsVersionSummary: tenantProcedure
+    .input(
+      z.object({
+        tenantId: z.string().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const filter = getTenantFilter({
+        isAdmin: ctx.isAdmin,
+        tenantId: ctx.tenantId,
+        inputTenantId: input.tenantId,
+      });
+
+      // Get all Windows endpoints with version details
+      const windowsEndpoints = await ctx.db.endpoint.findMany({
+        where: {
+          ...filter,
+          operatingSystem: {
+            contains: "Windows",
+            mode: "insensitive",
+          },
+        },
+        select: {
+          id: true,
+          hostname: true,
+          operatingSystem: true,
+          osVersion: true,
+          lastSeen: true,
+          isCompliant: true,
+          client: {
+            select: { name: true },
+          },
+        },
+        orderBy: { hostname: "asc" },
+      });
+
+      // Define what constitutes "latest" versions
+      const latestVersionMap = {
+        "Windows 11": ["10.0.22631", "10.0.22621"], // 23H2, 22H2
+        "Windows 10": ["10.0.19045"], // 22H2 (final)
+        "Windows Server 2022": ["10.0.20348"],
+        "Windows Server 2019": ["10.0.17763"],
+      };
+
+      // Analyze each endpoint
+      const analysisResults = windowsEndpoints.map((endpoint) => {
+        const isLatest = Object.entries(latestVersionMap).some(
+          ([os, versions]) => {
+            return (
+              endpoint.operatingSystem?.includes(os.split(" ")[1]) &&
+              versions.includes(endpoint.osVersion || "")
+            );
+          },
+        );
+
+        const recommendedVersion = Object.entries(latestVersionMap).find(
+          ([os]) => endpoint.operatingSystem?.includes(os.split(" ")[1]),
+        )?.[1][0];
+
+        return {
+          ...endpoint,
+          analysis: {
+            isLatest,
+            needsUpdate: !isLatest && endpoint.osVersion,
+            recommendedVersion,
+            daysSinceLastSeen: endpoint.lastSeen
+              ? Math.floor(
+                  (Date.now() - endpoint.lastSeen.getTime()) /
+                    (1000 * 60 * 60 * 24),
+                )
+              : null,
+          },
+        };
+      });
+
+      return {
+        endpoints: analysisResults,
+        summary: {
+          total: windowsEndpoints.length,
+          latest: analysisResults.filter((e) => e.analysis.isLatest).length,
+          needsUpdate: analysisResults.filter((e) => e.analysis.needsUpdate)
+            .length,
+          unknown: analysisResults.filter((e) => !e.osVersion).length,
+        },
+      };
+    }),
+
+  // ============================================================================
+  // CLIENT MANAGEMENT (unchanged)
+  // ============================================================================
+
   getClients: tenantProcedure
     .input(
       z.object({
-        tenantId: z.string().optional(), // Only required for admin users
+        tenantId: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -307,7 +565,7 @@ export const tenantRouter = createTRPCRouter({
       });
 
       return ctx.db.client.findMany({
-        where: filter, // This is correct - clients table has tenantId field
+        where: filter,
         include: {
           _count: {
             select: { endpoints: true },
@@ -317,14 +575,11 @@ export const tenantRouter = createTRPCRouter({
       });
     }),
 
-  /**
-   * Create a new client within a tenant
-   */
   createClient: tenantProcedure
     .input(
       z.object({
         name: z.string().min(1),
-        tenantId: z.string().optional(), // Only required for admin users
+        tenantId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -343,16 +598,13 @@ export const tenantRouter = createTRPCRouter({
     }),
 
   // ============================================================================
-  // SYNC STATUS
+  // SYNC STATUS (unchanged)
   // ============================================================================
 
-  /**
-   * Get latest sync status for a tenant
-   */
   getSyncStatus: tenantProcedure
     .input(
       z.object({
-        tenantId: z.string().optional(), // Only required for admin users
+        tenantId: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -362,14 +614,12 @@ export const tenantRouter = createTRPCRouter({
         inputTenantId: input.tenantId,
       });
 
-      // Get latest sync jobs for each source
       const syncJobs = await ctx.db.syncJob.findMany({
-        where: filter, // This is correct - syncJob table has tenantId field
+        where: filter,
         orderBy: { startedAt: "desc" },
-        take: 10, // Get recent jobs for each source
+        take: 10,
       });
 
-      // Group by source and get the latest for each
       const latestBySource = syncJobs.reduce(
         (acc, job) => {
           if (!acc[job.source] || acc[job.source].startedAt < job.startedAt) {

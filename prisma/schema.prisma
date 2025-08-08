@@ -2,12 +2,12 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -15,83 +15,145 @@ datasource db {
 // ============================================================================
 
 model Tenant {
-    id        String   @id @default(cuid())
-    name      String   // D9 client company name
-    slug      String   @unique // URL-friendly identifier
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    
-    // Relationships
-    users     User[]
-    clients   Client[]
-    endpoints Endpoint[]
-    syncJobs  SyncJob[] // Add this missing relation
-    
-    // API sync tracking
-    sentinelOneLastSync DateTime?
-    ninjaOneLastSync    DateTime?
-    msGraphLastSync     DateTime?
-    
-    @@index([slug])
+  id        String   @id @default(cuid())
+  name      String // D9 client company name
+  slug      String   @unique // URL-friendly identifier
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  users     User[]
+  clients   Client[]
+  endpoints Endpoint[]
+  syncJobs  SyncJob[] // Add this missing relation
+
+  // API sync tracking
+  sentinelOneLastSync   DateTime?
+  ninjaOneLastSync      DateTime?
+  msGraphLastSync       DateTime?
+  WindowsComplianceRule WindowsComplianceRule[]
+
+  @@index([slug])
 }
 
 model Client {
-    id        String   @id @default(cuid())
-    name      String   // Client organization name within tenant
-    tenantId  String
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    
-    // Relationships
-    tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-    endpoints Endpoint[]
-    
-    @@index([tenantId])
+  id        String   @id @default(cuid())
+  name      String // Client organization name within tenant
+  tenantId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  endpoints Endpoint[]
+
+  @@index([tenantId])
 }
 
 model Endpoint {
-    id        String   @id @default(cuid())
-    hostname  String
-    tenantId  String
-    clientId  String?  // Optional - some endpoints might not be assigned to a specific client
-    
-    // External system IDs
-    sentinelOneAgentId String?
-    ninjaOneDeviceId   String?
-    azureDeviceId      String?
-    
-    // Basic endpoint info
-    operatingSystem    String?
-    osVersion         String?
-    ipAddress         String?
-    macAddress        String?
-    lastSeen          DateTime?
-    
-    // Compliance status
-    isCompliant       Boolean @default(false)
-    complianceScore   Int?    // 0-100
-    
-    // Vulnerability counts
-    criticalVulns     Int @default(0)
-    highVulns        Int @default(0)
-    mediumVulns      Int @default(0)
-    lowVulns         Int @default(0)
-    
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    
-    // Relationships
-    tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-    client       Client?               @relation(fields: [clientId], references: [id], onDelete: SetNull)
-    vulnerabilities EndpointVulnerability[]
-    complianceChecks ComplianceCheck[]
-    
-    @@unique([tenantId, hostname]) // Hostnames should be unique within a tenant
-    @@index([tenantId])
-    @@index([clientId])
-    @@index([sentinelOneAgentId])
-    @@index([ninjaOneDeviceId])
-    @@index([lastSeen])
+  id       String  @id @default(cuid())
+  hostname String
+  tenantId String
+  clientId String? // Optional - some endpoints might not be assigned to a specific client
+
+  // External system IDs
+  sentinelOneAgentId String?
+  ninjaOneDeviceId   String?
+  azureDeviceId      String?
+
+  // Basic endpoint info
+  operatingSystem String?
+  osVersion       String?
+  ipAddress       String?
+  macAddress      String?
+  lastSeen        DateTime?
+
+  // Compliance status
+  isCompliant     Boolean @default(false)
+  complianceScore Int? // 0-100
+
+  // Vulnerability counts
+  criticalVulns Int @default(0)
+  highVulns     Int @default(0)
+  mediumVulns   Int @default(0)
+  lowVulns      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  tenant           Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client           Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  vulnerabilities  EndpointVulnerability[]
+  complianceChecks ComplianceCheck[]
+
+  // === WINDOWS COMPLIANCE DATA ===
+  osName      String? // "Windows 11 Pro"
+  osRevision  String? // "22631.2715" (build number)
+  osType      String? // "windows" 
+  osArch      String? // "x64"
+  osStartTime DateTime? // Last boot time
+  osUsername  String? // Current user
+
+  // === HARDWARE INFO ===
+  serialNumber String? // Device serial number
+  modelName    String? // Device model
+  totalMemory  Int? // Memory in MB
+  coreCount    Int? // CPU cores
+  cpuCount     Int? // Number of CPUs
+  cpuId        String? // CPU model
+
+  // === SENTINELONE AGENT STATUS ===
+  sentinelOneAgentVersion String? // Agent version
+  agentLastActiveDate     DateTime? // When agent was last active
+  isAgentActive           Boolean   @default(false)
+  isAgentUpToDate         Boolean   @default(false)
+  agentRegisteredAt       DateTime? // First registration
+
+  // === SECURITY & THREATS ===
+  activeThreats         Int     @default(0)
+  isInfected            Boolean @default(false)
+  detectionState        String? // Detection state
+  firewallEnabled       Boolean @default(false)
+  encryptedApplications Boolean @default(false)
+  threatRebootRequired  Boolean @default(false)
+
+  // === COMPLIANCE STATUS ===
+  lastSuccessfulScan DateTime? // Last full disk scan
+  scanStatus         String? // Current scan status
+  userActionsNeeded  String[] // Actions like "reboot_needed"
+  missingPermissions String[] // Missing permissions
+
+  // === NETWORK & DOMAIN ===
+  domain                   String? // Network domain
+  externalIp               String? // External IP
+  lastIpToMgmt             String? // Last IP to management
+  networkQuarantineEnabled Boolean @default(false)
+
+  // === ACTIVE DIRECTORY ===
+  adComputerDistinguishedName String?
+  adComputerMemberOf          String[]
+  adLastUserDistinguishedName String?
+  adUserPrincipalName         String?
+
+  // === WINDOWS COMPLIANCE ===
+  windowsCompliant      Boolean     @default(false)
+  windowsComplianceScore Int?       
+  lastWindowsCheck      DateTime?
+
+  // === APP VULNERABILITY STATUS ===
+  appsVulnerabilityStatus String? // From SentinelOne
+
+  @@unique([tenantId, hostname]) // Hostnames should be unique within a tenant
+  @@index([osRevision])
+  @@index([activeThreats])
+  @@index([isInfected])
+  @@index([userActionsNeeded])
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([sentinelOneAgentId])
+  @@index([ninjaOneDeviceId])
+  @@index([lastSeen])
 }
 
 // ============================================================================
@@ -99,48 +161,48 @@ model Endpoint {
 // ============================================================================
 
 model Vulnerability {
-    id          String @id @default(cuid())
-    cveId       String? // CVE identifier if available
-    title       String
-    description String?
-    severity    VulnerabilitySeverity
-    cvssScore   Float?
-    
-    // Vendor/product info
-    vendor      String?
-    product     String?
-    version     String?
-    
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
-    
-    // Relationships
-    endpoints   EndpointVulnerability[]
-    
-    @@unique([cveId])
-    @@index([severity])
+  id          String                @id @default(cuid())
+  cveId       String? // CVE identifier if available
+  title       String
+  description String?
+  severity    VulnerabilitySeverity
+  cvssScore   Float?
+
+  // Vendor/product info
+  vendor  String?
+  product String?
+  version String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  endpoints EndpointVulnerability[]
+
+  @@unique([cveId])
+  @@index([severity])
 }
 
 model EndpointVulnerability {
-    id              String   @id @default(cuid())
-    endpointId      String
-    vulnerabilityId String
-    
-    // Source of detection
-    detectedBy      VulnerabilitySource
-    detectedAt      DateTime @default(now())
-    
-    // Status tracking
-    status          VulnerabilityStatus @default(OPEN)
-    resolvedAt      DateTime?
-    
-    // Relationships
-    endpoint        Endpoint      @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-    vulnerability   Vulnerability @relation(fields: [vulnerabilityId], references: [id], onDelete: Cascade)
-    
-    @@unique([endpointId, vulnerabilityId])
-    @@index([status])
-    @@index([detectedAt])
+  id              String @id @default(cuid())
+  endpointId      String
+  vulnerabilityId String
+
+  // Source of detection
+  detectedBy VulnerabilitySource
+  detectedAt DateTime            @default(now())
+
+  // Status tracking
+  status     VulnerabilityStatus @default(OPEN)
+  resolvedAt DateTime?
+
+  // Relationships
+  endpoint      Endpoint      @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  vulnerability Vulnerability @relation(fields: [vulnerabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, vulnerabilityId])
+  @@index([status])
+  @@index([detectedAt])
 }
 
 // ============================================================================
@@ -148,39 +210,39 @@ model EndpointVulnerability {
 // ============================================================================
 
 model ComplianceFramework {
-    id          String @id @default(cuid())
-    name        String @unique // e.g., "CIS Controls", "NIST", "SOC2"
-    version     String?
-    description String?
-    
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
-    
-    // Relationships
-    checks      ComplianceCheck[]
+  id          String  @id @default(cuid())
+  name        String  @unique // e.g., "CIS Controls", "NIST", "SOC2"
+  version     String?
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  checks ComplianceCheck[]
 }
 
 model ComplianceCheck {
-    id          String   @id @default(cuid())
-    endpointId  String
-    frameworkId String
-    
-    checkName   String   // e.g., "Windows Updates Current"
-    checkId     String   // Framework-specific ID
-    status      ComplianceStatus
-    lastChecked DateTime @default(now())
-    
-    // Evidence/details
-    evidence    String?  // JSON blob with check details
-    remediation String?  // Suggested remediation steps
-    
-    // Relationships
-    endpoint    Endpoint            @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-    framework   ComplianceFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
-    
-    @@unique([endpointId, frameworkId, checkId])
-    @@index([status])
-    @@index([lastChecked])
+  id          String @id @default(cuid())
+  endpointId  String
+  frameworkId String
+
+  checkName   String // e.g., "Windows Updates Current"
+  checkId     String // Framework-specific ID
+  status      ComplianceStatus
+  lastChecked DateTime         @default(now())
+
+  // Evidence/details
+  evidence    String? // JSON blob with check details
+  remediation String? // Suggested remediation steps
+
+  // Relationships
+  endpoint  Endpoint            @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  framework ComplianceFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, frameworkId, checkId])
+  @@index([status])
+  @@index([lastChecked])
 }
 
 // ============================================================================
@@ -188,29 +250,29 @@ model ComplianceCheck {
 // ============================================================================
 
 model SyncJob {
-    id          String    @id @default(cuid())
-    tenantId    String
-    source      ApiSource
-    status      SyncStatus @default(PENDING)
-    startedAt   DateTime  @default(now())
-    completedAt DateTime?
-    
-    // Metrics
-    recordsProcessed Int     @default(0)
-    recordsUpdated   Int     @default(0)
-    recordsCreated   Int     @default(0)
-    recordsFailed    Int     @default(0)
-    
-    // Error tracking
-    errorMessage     String?
-    errorDetails     String? // JSON blob with detailed error info
-    
-    // Relationships
-    tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-    
-    @@index([tenantId, source])
-    @@index([status])
-    @@index([startedAt])
+  id          String     @id @default(cuid())
+  tenantId    String
+  source      ApiSource
+  status      SyncStatus @default(PENDING)
+  startedAt   DateTime   @default(now())
+  completedAt DateTime?
+
+  // Metrics
+  recordsProcessed Int @default(0)
+  recordsUpdated   Int @default(0)
+  recordsCreated   Int @default(0)
+  recordsFailed    Int @default(0)
+
+  // Error tracking
+  errorMessage String?
+  errorDetails String? // JSON blob with detailed error info
+
+  // Relationships
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source])
+  @@index([status])
+  @@index([startedAt])
 }
 
 // ============================================================================
@@ -218,29 +280,29 @@ model SyncJob {
 // ============================================================================
 
 model User {
-    id            String    @id @default(cuid())
-    name          String?
-    email         String?   @unique
-    emailVerified DateTime?
-    image         String?
-    password      String?   // For email/password auth
-    
-    // Multi-tenant fields
-    tenantId      String?   // NULL for D9 admin users
-    role          UserRole  @default(USER)
-    
-    // Audit fields
-    createdAt     DateTime  @default(now())
-    updatedAt     DateTime  @updatedAt
-    lastLoginAt   DateTime?
-    
-    // Relationships
-    tenant        Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-    accounts      Account[]
-    sessions      Session[]
-    
-    @@index([tenantId])
-    @@index([role])
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String? // For email/password auth
+
+  // Multi-tenant fields
+  tenantId String? // NULL for D9 admin users
+  role     UserRole @default(USER)
+
+  // Audit fields
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastLoginAt DateTime?
+
+  // Relationships
+  tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accounts Account[]
+  sessions Session[]
+
+  @@index([tenantId])
+  @@index([role])
 }
 
 // ============================================================================
@@ -248,40 +310,76 @@ model User {
 // ============================================================================
 
 model Account {
-    id                       String  @id @default(cuid())
-    userId                   String
-    type                     String
-    provider                 String
-    providerAccountId        String
-    refresh_token            String?
-    access_token             String?
-    expires_at               Int?
-    token_type               String?
-    scope                    String?
-    id_token                 String?
-    session_state            String?
-    refresh_token_expires_in Int?
-    
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-    
-    @@unique([provider, providerAccountId])
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String?
+  access_token             String?
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String?
+  session_state            String?
+  refresh_token_expires_in Int?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
 }
 
 model Session {
-    id           String   @id @default(cuid())
-    sessionToken String   @unique
-    userId       String
-    expires      DateTime
-    
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
-    identifier String
-    token      String   @unique
-    expires    DateTime
-    
-    @@unique([identifier, token])
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model WindowsComplianceRule {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  name                  String
+  description           String?
+  requireLatestGA       Boolean  @default(true)
+  maxVersionsBehind     Int      @default(1)
+  maxDaysBehindSecurity Int      @default(30)
+  allowPreview          Boolean  @default(false)
+  isActive              Boolean  @default(true)
+  priority              Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isActive])
+}
+
+model Application {
+  id                String    @id @default(cuid())
+  name              String
+  vendor            String?
+  category          String    @default("OTHER")
+  hasKnownVulns     Boolean   @default(false)
+  riskLevel         String    @default("LOW")
+  isMonitored       Boolean   @default(true)
+  requiresUpdates   Boolean   @default(true)
+  latestVersion     String?
+  latestVersionDate DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([name, vendor])
 }
 
 // ============================================================================
@@ -289,52 +387,52 @@ model VerificationToken {
 // ============================================================================
 
 enum UserRole {
-    ADMIN       // D9 admin - can see all tenants
-    USER        // Client user - can only see their tenant
-    READONLY    // Read-only access within tenant
+  ADMIN // D9 admin - can see all tenants
+  USER // Client user - can only see their tenant
+  READONLY // Read-only access within tenant
 }
 
 enum VulnerabilitySeverity {
-    CRITICAL
-    HIGH
-    MEDIUM
-    LOW
-    INFO
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
 }
 
 enum VulnerabilitySource {
-    SENTINELONE
-    NINJAONE
-    MICROSOFT_GRAPH
-    MANUAL
+  SENTINELONE
+  NINJAONE
+  MICROSOFT_GRAPH
+  MANUAL
 }
 
 enum VulnerabilityStatus {
-    OPEN
-    IN_PROGRESS
-    RESOLVED
-    FALSE_POSITIVE
-    ACCEPTED_RISK
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  FALSE_POSITIVE
+  ACCEPTED_RISK
 }
 
 enum ComplianceStatus {
-    COMPLIANT
-    NON_COMPLIANT
-    PARTIAL
-    NOT_APPLICABLE
-    UNKNOWN
+  COMPLIANT
+  NON_COMPLIANT
+  PARTIAL
+  NOT_APPLICABLE
+  UNKNOWN
 }
 
 enum ApiSource {
-    SENTINELONE
-    NINJAONE
-    MICROSOFT_GRAPH
+  SENTINELONE
+  NINJAONE
+  MICROSOFT_GRAPH
 }
 
 enum SyncStatus {
-    PENDING
-    RUNNING
-    COMPLETED
-    FAILED
-    CANCELLED
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
 }
