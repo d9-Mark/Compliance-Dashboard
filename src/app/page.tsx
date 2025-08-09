@@ -1,69 +1,126 @@
+// src/app/page.tsx - Cleaned up version
 import Link from "next/link";
-
-import { LatestPost } from "~/app/_components/post";
 import { auth } from "~/server/auth";
-import { api, HydrateClient } from "~/trpc/server";
 
 export default async function Home() {
-  const hello = await api.post.hello({ text: "from tRPC" });
   const session = await auth();
 
-  // if (session?.user) {
-  //   void api.post.getLatest.prefetch();
-  // }
+  // Determine the correct dashboard URL for the user
+  const getDashboardUrl = () => {
+    if (!session?.user) return "/auth/signin";
+
+    if (session.user.role === "ADMIN") {
+      return "/admin/dashboard";
+    }
+
+    if (session.user.tenantSlug) {
+      return `/tenant/${session.user.tenantSlug}/dashboard`;
+    }
+
+    return "/auth/error?error=NoTenant";
+  };
+
+  const dashboardUrl = getDashboardUrl();
 
   return (
-    <HydrateClient>
-      <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
-        <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
+      <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
+        {/* Header */}
+        <div className="text-center">
           <h1 className="text-5xl font-extrabold tracking-tight sm:text-[5rem]">
-            Create <span className="text-[hsl(280,100%,70%)]">T3</span> App
+            D9 <span className="text-[hsl(280,100%,70%)]">Compliance</span>
           </h1>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-8">
-            <Link
-              className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-              href="https://create.t3.gg/en/usage/first-steps"
-              target="_blank"
-            >
-              <h3 className="text-2xl font-bold">First Steps →</h3>
-              <div className="text-lg">
-                Just the basics - Everything you need to know to set up your
-                database and authentication.
-              </div>
-            </Link>
-            <Link
-              className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-              href="https://create.t3.gg/en/introduction"
-              target="_blank"
-            >
-              <h3 className="text-2xl font-bold">Documentation →</h3>
-              <div className="text-lg">
-                Learn more about Create T3 App, the libraries it uses, and how
-                to deploy it.
-              </div>
-            </Link>
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-2xl text-white">
-              {hello ? hello.greeting : "Loading tRPC query..."}
-            </p>
+          <p className="mt-4 text-xl text-white/80">
+            Unified security compliance dashboard
+          </p>
+        </div>
 
-            <div className="flex flex-col items-center justify-center gap-4">
-              <p className="text-center text-2xl text-white">
-                {session && <span>Logged in as {session.user?.name}</span>}
-              </p>
-              <Link
-                href={session ? "/api/auth/signout" : "/api/auth/signin"}
-                className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
-              >
-                {session ? "Sign out" : "Sign in"}
-              </Link>
+        {/* Features Grid */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-8">
+          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20">
+            <h3 className="text-2xl font-bold">🛡️ SentinelOne Integration</h3>
+            <div className="text-lg">
+              Real-time endpoint security monitoring and compliance tracking
             </div>
           </div>
 
-          {session?.user && <LatestPost />}
+          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20">
+            <h3 className="text-2xl font-bold">🪟 Windows Compliance</h3>
+            <div className="text-lg">
+              Automated Windows version tracking and update management
+            </div>
+          </div>
+
+          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20">
+            <h3 className="text-2xl font-bold">🏢 Multi-Tenant</h3>
+            <div className="text-lg">
+              Manage multiple client environments with tenant isolation
+            </div>
+          </div>
+
+          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20">
+            <h3 className="text-2xl font-bold">📊 Real-time Dashboards</h3>
+            <div className="text-lg">
+              Live compliance scores, threat detection, and remediation tracking
+            </div>
+          </div>
         </div>
-      </main>
-    </HydrateClient>
+
+        {/* User Status & Actions */}
+        <div className="flex flex-col items-center gap-6">
+          {session?.user ? (
+            <div className="text-center">
+              <p className="mb-4 text-xl text-white/90">
+                Welcome back,{" "}
+                <span className="font-semibold">{session.user.name}</span>
+                {session.user.role === "ADMIN" && (
+                  <span className="ml-2 rounded-full bg-purple-100 px-3 py-1 text-sm text-purple-800">
+                    ADMIN
+                  </span>
+                )}
+              </p>
+
+              <div className="flex gap-4">
+                <Link
+                  href={dashboardUrl}
+                  className="rounded-full bg-[hsl(280,100%,70%)] px-8 py-3 font-semibold text-white transition hover:bg-[hsl(280,100%,60%)]"
+                >
+                  {session.user.role === "ADMIN"
+                    ? "Go to Admin Dashboard →"
+                    : "Go to Dashboard →"}
+                </Link>
+
+                <Link
+                  href="/auth/signout"
+                  className="rounded-full bg-white/10 px-8 py-3 font-semibold transition hover:bg-white/20"
+                >
+                  Sign Out
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center">
+              <p className="mb-4 text-xl text-white/90">
+                Secure access to your compliance data
+              </p>
+
+              <Link
+                href="/auth/signin"
+                className="rounded-full bg-[hsl(280,100%,70%)] px-8 py-3 font-semibold text-white transition hover:bg-[hsl(280,100%,60%)]"
+              >
+                Sign In
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="text-center text-white/60">
+          <p className="text-sm">
+            Powered by SentinelOne • Built with Next.js & tRPC
+          </p>
+        </div>
+      </div>
+    </main>
   );
 }

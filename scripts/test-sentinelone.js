@@ -213,10 +213,10 @@ async function testSentinelOneConnection() {
     );
 
     const sitesData = await accountsResponse.json();
-    console.log(sitesData.data);
-    sitesData.data.sites.forEach((site) => {
-      console.log(`   • Site: ${site.name} (ID: ${site.id})`);
-    });
+    console.log(sitesData);
+    // sitesData.data.sites.forEach((site) => {
+    //   console.log(`   • Site: ${site.name} (ID: ${site.id})`);
+    // });
 
     return true;
   } catch (error) {

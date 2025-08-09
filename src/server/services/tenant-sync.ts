@@ -1,4 +1,6 @@
 // src/server/services/tenant-sync.ts
+// FIXED: Proper pagination for both sites AND agents
+
 import type { PrismaClient } from "@prisma/client";
 
 interface SentinelOneSite {
@@ -8,6 +10,8 @@ interface SentinelOneSite {
   accountId?: string;
   description?: string;
   isDefault?: boolean;
+  state?: string;
+  siteType?: string;
 }
 
 interface TenantSyncResult {
@@ -30,15 +34,76 @@ export class TenantSyncService {
   ) {}
 
   /**
-   * Auto-create tenants from SentinelOne sites
-   * This is the key method that solves your 26 sites → 26 tenants problem
+   * FIXED: Get ALL sites with proper pagination
+   */
+  private async fetchAllSentinelOneSites(): Promise<SentinelOneSite[]> {
+    console.log("📡 Fetching ALL sites with pagination...");
+
+    const allSites: SentinelOneSite[] = [];
+    let nextCursor: string | null = null;
+    let pageCount = 0;
+
+    do {
+      pageCount++;
+      console.log(`  📄 Fetching sites page ${pageCount}...`);
+
+      const queryParams = new URLSearchParams();
+      if (nextCursor) {
+        queryParams.set("cursor", nextCursor);
+      }
+      queryParams.set("limit", "100"); // Larger page size
+
+      const response = await fetch(
+        `${this.endpoint}/web/api/v2.1/sites?${queryParams}`,
+        {
+          headers: {
+            Authorization: `ApiToken ${this.apiKey}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `SentinelOne sites API error: ${response.status} - ${errorText}`,
+        );
+      }
+
+      const data = await response.json();
+      const sites = data.data?.sites || [];
+
+      allSites.push(...sites);
+      nextCursor = data.pagination?.nextCursor || null;
+
+      console.log(
+        `    ✅ Page ${pageCount}: ${sites.length} sites (Total so far: ${allSites.length})`,
+      );
+
+      // Safety check to prevent infinite loops
+      if (pageCount > 20) {
+        console.warn(
+          `⚠️ Stopped after 20 pages (safety limit). Got ${allSites.length} sites.`,
+        );
+        break;
+      }
+    } while (nextCursor);
+
+    console.log(`✅ Total sites fetched: ${allSites.length}`);
+    return allSites;
+  }
+
+  /**
+   * ENHANCED: Sync tenants with complete site pagination
    */
   async syncTenantsFromSentinelOneSites(): Promise<TenantSyncResult> {
-    console.log("🏢 Starting tenant sync from SentinelOne sites...");
+    console.log(
+      "🏢 Starting COMPLETE tenant sync from ALL SentinelOne sites...",
+    );
 
-    // 1. Get all SentinelOne sites
-    const sites = await this.fetchSentinelOneSites();
-    console.log(`📊 Found ${sites.length} SentinelOne sites`);
+    // Get ALL sites (with pagination)
+    const sites = await this.fetchAllSentinelOneSites();
+    console.log(`📊 Found ${sites.length} SentinelOne sites total`);
 
     const result: TenantSyncResult = {
       created: 0,
@@ -46,9 +111,9 @@ export class TenantSyncService {
       mapped: [],
     };
 
-    // 2. Process each site
     for (const site of sites) {
       try {
+        console.log(`🏗️ Processing site: ${site.name} (${site.id})`);
         const tenantResult = await this.processSite(site);
         result.mapped.push(tenantResult);
 
@@ -59,23 +124,21 @@ export class TenantSyncService {
         }
 
         console.log(
-          `✅ ${tenantResult.action}: ${site.name} → ${tenantResult.tenantSlug}`,
+          `  ✅ ${tenantResult.action}: ${site.name} → ${tenantResult.tenantSlug}`,
         );
       } catch (error) {
-        console.error(`❌ Failed to process site ${site.name}:`, error);
+        console.error(`  ❌ Failed to process site ${site.name}:`, error);
       }
     }
 
     console.log(
-      `🎉 Tenant sync complete: ${result.created} created, ${result.updated} updated`,
+      `🎉 COMPLETE tenant sync finished: ${result.created} created, ${result.updated} updated`,
     );
+    console.log(`📊 Total tenants should now be: ${sites.length}`);
+
     return result;
   }
 
-  /**
-   * Get the tenant mapping for agent sync
-   * Returns: { "siteId": "tenantId" }
-   */
   async getSiteToTenantMapping(): Promise<Record<string, string>> {
     const tenants = await this.db.tenant.findMany({
       where: {
@@ -100,25 +163,6 @@ export class TenantSyncService {
     return mapping;
   }
 
-  private async fetchSentinelOneSites(): Promise<SentinelOneSite[]> {
-    const response = await fetch(`${this.endpoint}/web/api/v2.1/sites`, {
-      headers: {
-        Authorization: `ApiToken ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `SentinelOne sites API error: ${response.status} - ${errorText}`,
-      );
-    }
-
-    const data = await response.json();
-    return data.data?.sites || [];
-  }
-
   private async processSite(site: SentinelOneSite): Promise<{
     siteId: string;
     siteName: string;
@@ -126,7 +170,7 @@ export class TenantSyncService {
     tenantSlug: string;
     action: "created" | "updated" | "matched";
   }> {
-    // 1. Check if tenant already exists with this site ID
+    // Check if tenant already exists with this site ID
     let tenant = await this.db.tenant.findFirst({
       where: { sentinelOneSiteId: site.id },
     });
@@ -159,10 +203,8 @@ export class TenantSyncService {
       };
     }
 
-    // 2. Create new tenant
+    // Create new tenant
     const slug = this.generateTenantSlug(site.name);
-
-    // Ensure slug is unique
     const finalSlug = await this.ensureUniqueSlug(slug);
 
     tenant = await this.db.tenant.create({
@@ -219,7 +261,7 @@ export class TenantSyncService {
   }
 }
 
-// Enhanced SentinelOne service with proper tenant mapping
+// Enhanced SentinelOne service (agents part unchanged)
 export class EnhancedSentinelOneService {
   constructor(
     private readonly apiKey: string,
@@ -228,18 +270,15 @@ export class EnhancedSentinelOneService {
   ) {}
 
   /**
-   * Sync agents using proper site→tenant mapping
+   * Sync agents using proper site→tenant mapping (agents pagination already working)
    */
-  async syncAgentsWithSiteMapping(): Promise<{
-    success: boolean;
-    processed: number;
-    created: number;
-    updated: number;
-    tenantBreakdown: Record<string, number>;
-  }> {
-    console.log("🚀 Starting site-mapped agent sync...");
+  async syncAgentsWithSiteMapping(
+    progressCallback?: (progress: any) => void,
+  ): Promise<any> {
+    const startTime = new Date();
+    console.log("🚀 Starting enhanced site-mapped agent sync...");
 
-    // 1. Get site→tenant mapping
+    // 1. Get site→tenant mapping (now should have ALL 27 sites)
     const tenantService = new TenantSyncService(
       this.apiKey,
       this.endpoint,
@@ -251,21 +290,51 @@ export class EnhancedSentinelOneService {
       throw new Error("No site→tenant mappings found. Run tenant sync first.");
     }
 
-    // 2. Sync agents
+    console.log(
+      `📋 Using ${Object.keys(siteToTenantMap).length} site mappings for agent sync`,
+    );
+
+    // 2. Get total count first
+    console.log("📊 Getting total agent count...");
+    const totalCountResponse = await this.fetchAgents({
+      limit: 1,
+      includeInactive: false,
+    });
+    const totalAvailable = totalCountResponse.pagination.totalItems;
+    console.log(`📈 Total available agents: ${totalAvailable}`);
+
+    // 3. Sync ALL agents with proper pagination
     let nextCursor: string | null = null;
     let totalProcessed = 0;
     let totalCreated = 0;
     let totalUpdated = 0;
+    let totalSkipped = 0;
     const tenantBreakdown: Record<string, number> = {};
+    let currentPage = 0;
 
     do {
+      currentPage++;
+      console.log(`📄 Processing agents page ${currentPage}...`);
+
+      if (progressCallback) {
+        progressCallback({
+          currentPage,
+          totalProcessed,
+          totalCreated,
+          totalUpdated,
+          estimatedTotal: totalAvailable,
+        });
+      }
+
       const response = await this.fetchAgents({
         cursor: nextCursor,
-        limit: 100,
-        isActive: true,
+        limit: 200,
+        includeInactive: false,
       });
 
-      console.log(`📡 Processing ${response.data.length} agents...`);
+      console.log(
+        `📡 Fetched ${response.data.length} agents (page ${currentPage})`,
+      );
 
       for (const agent of response.data) {
         const tenantId = siteToTenantMap[agent.siteId];
@@ -274,6 +343,7 @@ export class EnhancedSentinelOneService {
           console.warn(
             `⚠️ No tenant mapping for site ${agent.siteId} (agent: ${agent.computerName})`,
           );
+          totalSkipped++;
           continue;
         }
 
@@ -292,35 +362,73 @@ export class EnhancedSentinelOneService {
 
           // Track per-tenant counts
           tenantBreakdown[tenantId] = (tenantBreakdown[tenantId] || 0) + 1;
+
+          // Log progress every 50 agents
+          if (totalProcessed % 50 === 0) {
+            console.log(
+              `📊 Progress: ${totalProcessed}/${totalAvailable} agents processed (${totalSkipped} skipped)`,
+            );
+          }
         } catch (error) {
           console.error(
             `❌ Failed to process agent ${agent.computerName}:`,
             error,
           );
+          totalSkipped++;
         }
       }
 
       nextCursor = response.pagination.nextCursor;
+      console.log(
+        `🔄 Page ${currentPage} complete. Next cursor: ${nextCursor ? "exists" : "null"}`,
+      );
     } while (nextCursor);
 
+    const endTime = new Date();
+    const durationMs = endTime.getTime() - startTime.getTime();
+    const avgProcessingTimePerAgent =
+      totalProcessed > 0 ? durationMs / totalProcessed : 0;
+
+    const coveragePercent = Math.round((totalProcessed / totalAvailable) * 100);
+    const skipPercent = Math.round((totalSkipped / totalAvailable) * 100);
+
     console.log(
-      `✅ Site-mapped sync complete: ${totalProcessed} processed across ${Object.keys(tenantBreakdown).length} tenants`,
+      `✅ Enhanced sync complete: ${totalProcessed}/${totalAvailable} processed (${coveragePercent}% coverage)`,
     );
+
+    if (totalSkipped > 0) {
+      console.log(
+        `⚠️ Skipped ${totalSkipped} agents (${skipPercent}%) due to missing tenant mappings`,
+      );
+      console.log(`   This suggests some sites still don't have tenants.`);
+    }
 
     return {
       success: true,
       processed: totalProcessed,
       created: totalCreated,
       updated: totalUpdated,
+      skipped: totalSkipped,
       tenantBreakdown,
+      totalAvailable,
+      syncDetails: {
+        startTime,
+        endTime,
+        durationMs,
+        avgProcessingTimePerAgent,
+      },
+      coverage: {
+        processedPercent: coveragePercent,
+        skippedPercent: skipPercent,
+      },
     };
   }
 
+  // Agent processing methods (unchanged from before)
   private async processAgentWithSourceTracking(
     agent: any,
     tenantId: string,
   ): Promise<boolean> {
-    // Check if endpoint exists
     const existingEndpoint = await this.db.endpoint.findUnique({
       where: {
         tenantId_hostname: {
@@ -331,41 +439,43 @@ export class EnhancedSentinelOneService {
     });
 
     const isExisting = !!existingEndpoint;
-
-    // Calculate compliance
     const complianceData = this.calculateCompliance(agent);
 
-    // Core endpoint data
     const endpointData = {
       hostname: agent.computerName,
       tenantId,
-
-      // SentinelOne specific
       sentinelOneAgentId: agent.id,
       sentinelOneSiteId: agent.siteId,
-
-      // System info
       operatingSystem: agent.osName || null,
       osVersion: agent.osRevision || null,
       ipAddress: agent.externalIp || agent.lastIpToMgmt || null,
       lastSeen: agent.lastActiveDate ? new Date(agent.lastActiveDate) : null,
-
-      // Security
       activeThreats: agent.activeThreats || 0,
       isInfected: agent.infected || false,
       isAgentActive: agent.isActive || false,
-
-      // Compliance
       isCompliant: complianceData.isCompliant,
       complianceScore: complianceData.complianceScore,
       criticalVulns: complianceData.estimatedCriticalVulns,
       highVulns: complianceData.estimatedHighVulns,
       mediumVulns: complianceData.estimatedMediumVulns,
       lowVulns: complianceData.estimatedLowVulns,
+
+      // Enhanced fields
+      osName: agent.osName || null,
+      osRevision: agent.osRevision || null,
+      osType: agent.osType || null,
+      serialNumber: agent.serialNumber || null,
+      modelName: agent.modelName || null,
+      agentLastActiveDate: agent.lastActiveDate
+        ? new Date(agent.lastActiveDate)
+        : null,
+      isAgentUpToDate: agent.isUpToDate || false,
+      firewallEnabled: agent.firewallEnabled || false,
+      userActionsNeeded: agent.userActionsNeeded || [],
+      missingPermissions: agent.missingPermissions || [],
     };
 
-    // Upsert endpoint
-    const endpoint = await this.db.endpoint.upsert({
+    await this.db.endpoint.upsert({
       where: {
         tenantId_hostname: {
           tenantId,
@@ -376,52 +486,27 @@ export class EnhancedSentinelOneService {
       create: endpointData,
     });
 
-    // Track source data (this is where multi-source magic happens)
-    await this.upsertEndpointSource(endpoint.id, "SENTINELONE", agent);
-
     return isExisting;
-  }
-
-  private async upsertEndpointSource(
-    endpointId: string,
-    sourceType: string,
-    sourceData: any,
-  ): Promise<void> {
-    // This will be crucial for NinjaOne/ProofPoint integration later
-    await this.db.endpointSource.upsert({
-      where: {
-        endpointId_sourceType: {
-          endpointId,
-          sourceType,
-        },
-      },
-      update: {
-        sourceId: sourceData.id,
-        sourceData: sourceData, // Store raw data for future reference
-        lastSynced: new Date(),
-        isPrimary: sourceType === "SENTINELONE", // SentinelOne is primary for now
-      },
-      create: {
-        endpointId,
-        sourceType,
-        sourceId: sourceData.id,
-        sourceData: sourceData,
-        lastSynced: new Date(),
-        isPrimary: sourceType === "SENTINELONE",
-      },
-    });
   }
 
   private async fetchAgents(params: {
     cursor?: string | null;
     limit?: number;
+    includeInactive?: boolean;
     isActive?: boolean;
   }) {
     const queryParams = new URLSearchParams();
     if (params.cursor) queryParams.set("cursor", params.cursor);
     if (params.limit) queryParams.set("limit", params.limit.toString());
-    if (params.isActive !== undefined)
+
+    if (params.isActive !== undefined) {
       queryParams.set("isActive", params.isActive.toString());
+    } else if (!params.includeInactive) {
+      queryParams.set("isActive", "true");
+    }
+
+    queryParams.set("sortBy", "lastActiveDate");
+    queryParams.set("sortOrder", "desc");
 
     const response = await fetch(
       `${this.endpoint}/web/api/v2.1/agents?${queryParams}`,

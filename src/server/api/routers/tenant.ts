@@ -1,4 +1,4 @@
-// src/server/api/routers/tenant.ts - Enhanced with Windows version tracking
+// src/server/api/routers/tenant.ts - Enhanced with delete functionality
 
 import { TRPCError } from "@trpc/server";
 import z from "zod";
@@ -68,6 +68,178 @@ export const tenantRouter = createTRPCRouter({
         },
       });
     }),
+
+  /**
+   * DELETE TENANT - admin only (NEW)
+   */
+  delete: adminProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+        confirmSlug: z.string(), // Safety check - must type the slug to confirm
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Get tenant details first
+      const tenant = await ctx.db.tenant.findUnique({
+        where: { id: input.tenantId },
+        include: {
+          _count: {
+            select: {
+              users: true,
+              clients: true,
+              endpoints: true,
+            },
+          },
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      // Safety check - must type the exact slug to confirm deletion
+      if (tenant.slug !== input.confirmSlug) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `To delete this tenant, you must type the exact slug: "${tenant.slug}"`,
+        });
+      }
+
+      // Prevent deletion of tenants with SentinelOne data (unless explicitly forced)
+      if (tenant.sentinelOneSiteId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Cannot delete tenant linked to SentinelOne site. Use force delete if needed.",
+        });
+      }
+
+      // Delete the tenant (cascade will handle related records)
+      await ctx.db.tenant.delete({
+        where: { id: input.tenantId },
+      });
+
+      return {
+        success: true,
+        deletedTenant: {
+          name: tenant.name,
+          slug: tenant.slug,
+          hadUsers: tenant._count.users,
+          hadClients: tenant._count.clients,
+          hadEndpoints: tenant._count.endpoints,
+        },
+      };
+    }),
+
+  /**
+   * FORCE DELETE TENANT - admin only (even SentinelOne-linked ones)
+   */
+  forceDelete: adminProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+        confirmSlug: z.string(),
+        forceConfirmation: z.literal("I UNDERSTAND THIS WILL DELETE ALL DATA"),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tenant = await ctx.db.tenant.findUnique({
+        where: { id: input.tenantId },
+        include: {
+          _count: {
+            select: {
+              users: true,
+              clients: true,
+              endpoints: true,
+            },
+          },
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      if (tenant.slug !== input.confirmSlug) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `To delete this tenant, you must type the exact slug: "${tenant.slug}"`,
+        });
+      }
+
+      // Delete the tenant (cascade will handle all related records)
+      await ctx.db.tenant.delete({
+        where: { id: input.tenantId },
+      });
+
+      return {
+        success: true,
+        deletedTenant: {
+          name: tenant.name,
+          slug: tenant.slug,
+          wasSentinelOneLinked: !!tenant.sentinelOneSiteId,
+          hadUsers: tenant._count.users,
+          hadClients: tenant._count.clients,
+          hadEndpoints: tenant._count.endpoints,
+        },
+      };
+    }),
+
+  /**
+   * Get tenants by type (test vs real)
+   */
+  getTenantsByType: adminProcedure.query(async ({ ctx }) => {
+    const allTenants = await ctx.db.tenant.findMany({
+      include: {
+        _count: {
+          select: {
+            users: true,
+            clients: true,
+            endpoints: true,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    const testTenants = allTenants.filter(
+      (t) =>
+        !t.sentinelOneSiteId &&
+        (t.slug.includes("acme") ||
+          t.slug.includes("tech-solutions") ||
+          t.slug.includes("global-enterprises")),
+    );
+
+    const sentinelOneTenants = allTenants.filter((t) => t.sentinelOneSiteId);
+    const otherTenants = allTenants.filter(
+      (t) =>
+        !t.sentinelOneSiteId && !testTenants.some((test) => test.id === t.id),
+    );
+
+    return {
+      all: allTenants,
+      test: testTenants,
+      sentinelOne: sentinelOneTenants,
+      other: otherTenants,
+      summary: {
+        total: allTenants.length,
+        testCount: testTenants.length,
+        sentinelOneCount: sentinelOneTenants.length,
+        otherCount: otherTenants.length,
+      },
+    };
+  }),
+
+  // ============================================================================
+  // EXISTING PROCEDURES (unchanged)
+  // ============================================================================
 
   /**
    * Get tenant overview with stats - ENHANCED with Windows version data
@@ -615,7 +787,10 @@ export const tenantRouter = createTRPCRouter({
       });
 
       const syncJobs = await ctx.db.syncJob.findMany({
-        where: filter,
+        where: {
+          ...filter,
+          source: "SENTINELONE",
+        },
         orderBy: { startedAt: "desc" },
         take: 10,
       });
