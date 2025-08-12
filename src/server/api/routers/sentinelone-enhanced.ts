@@ -14,6 +14,8 @@ import {
 
 export const sentinelOneRouter = createTRPCRouter({
   // Test SentinelOne connectivity with enhanced feedback
+  // REPLACE the testConnection endpoint in src/server/api/routers/sentinelone-enhanced.ts
+
   testConnection: adminProcedure.mutation(async ({ ctx }) => {
     if (!env.SENTINELONE_API_KEY || !env.SENTINELONE_ENDPOINT) {
       throw new Error(
@@ -24,28 +26,60 @@ export const sentinelOneRouter = createTRPCRouter({
     try {
       console.log("🔗 Testing SentinelOne connection...");
 
-      // Test sites endpoint first
-      const sitesResponse = await fetch(
-        `${env.SENTINELONE_ENDPOINT}/web/api/v2.1/sites`,
-        {
-          headers: {
-            Authorization: `ApiToken ${env.SENTINELONE_API_KEY}`,
-            "Content-Type": "application/json",
+      // FIXED: Get ALL sites with pagination
+      const allSites: any[] = [];
+      let nextCursor: string | null = null;
+      let pageCount = 0;
+
+      do {
+        pageCount++;
+        console.log(`  📄 Fetching sites page ${pageCount}...`);
+
+        const queryParams = new URLSearchParams();
+        if (nextCursor) {
+          queryParams.set("cursor", nextCursor);
+        }
+        queryParams.set("limit", "100"); // Get more per page
+
+        const sitesResponse = await fetch(
+          `${env.SENTINELONE_ENDPOINT}/web/api/v2.1/sites?${queryParams}`,
+          {
+            headers: {
+              Authorization: `ApiToken ${env.SENTINELONE_API_KEY}`,
+              "Content-Type": "application/json",
+            },
           },
-        },
-      );
-
-      if (!sitesResponse.ok) {
-        const errorText = await sitesResponse.text();
-        throw new Error(
-          `Sites API Error: ${sitesResponse.status} ${sitesResponse.statusText} - ${errorText}`,
         );
-      }
 
-      const sitesData = await sitesResponse.json();
-      const totalSites = sitesData.data?.sites?.length || 0;
+        if (!sitesResponse.ok) {
+          const errorText = await sitesResponse.text();
+          throw new Error(
+            `Sites API Error: ${sitesResponse.status} ${sitesResponse.statusText} - ${errorText}`,
+          );
+        }
 
-      // Test agents endpoint to get total count
+        const sitesData = await sitesResponse.json();
+        const sites = sitesData.data?.sites || [];
+
+        allSites.push(...sites);
+        nextCursor = sitesData.pagination?.nextCursor || null;
+
+        console.log(
+          `    ✅ Page ${pageCount}: ${sites.length} sites (Total so far: ${allSites.length})`,
+        );
+
+        // Safety check to prevent infinite loops
+        if (pageCount > 20) {
+          console.warn(
+            `⚠️ Stopped after 20 pages for safety. Got ${allSites.length} sites.`,
+          );
+          break;
+        }
+      } while (nextCursor);
+
+      const totalSites = allSites.length;
+
+      // Test agents endpoint to get total count (keep this part as is)
       const agentsResponse = await fetch(
         `${env.SENTINELONE_ENDPOINT}/web/api/v2.1/agents?limit=1`,
         {
@@ -77,9 +111,13 @@ export const sentinelOneRouter = createTRPCRouter({
         details: {
           totalSites,
           totalAgents,
-          sampleSite: sitesData.data?.sites?.[0]?.name || "None found",
+          sampleSite: allSites[0]?.name || "None found",
           apiVersion: "v2.1",
           timestamp: new Date().toISOString(),
+          // Add some additional useful info
+          sitesPerPage:
+            pageCount > 1 ? `Retrieved in ${pageCount} pages` : "Single page",
+          firstFewSites: allSites.slice(0, 5).map((site) => site.name),
         },
       };
     } catch (error) {

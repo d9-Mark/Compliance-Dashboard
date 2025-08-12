@@ -21,16 +21,16 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sentinelOneSiteId String? // SentinelOne site ID
-  ninjaOneOrganizationId String? // Future: NinjaOne org ID  
+  sentinelOneSiteId        String? // SentinelOne site ID
+  ninjaOneOrganizationId   String? // Future: NinjaOne org ID  
   proofpointOrganizationId String? // Future: ProofPoint org ID
 
   // Relationships
-  users     User[]
-  clients   Client[]
-  endpoints Endpoint[]
-  syncJobs  SyncJob[] // Add this missing relation
-  windowsCompliancePolicies   WindowsCompliancePolicy[]
+  users                     User[]
+  clients                   Client[]
+  endpoints                 Endpoint[]
+  syncJobs                  SyncJob[] // Add this missing relation
+  windowsCompliancePolicies WindowsCompliancePolicy[]
 
   // API sync tracking
   sentinelOneLastSync   DateTime?
@@ -68,12 +68,12 @@ model Endpoint {
   azureDeviceId      String?
 
   // Basic endpoint info
-  operatingSystem String?
-  osVersion       String?
-  ipAddress       String?
-  macAddress      String?
-  lastSeen        DateTime?
-  endpointSources EndpointSource[]
+  operatingSystem   String?
+  osVersion         String?
+  ipAddress         String?
+  macAddress        String?
+  lastSeen          DateTime?
+  endpointSources   EndpointSource[]
   sentinelOneSiteId String? // SentinelOne site ID
 
   // Compliance status
@@ -90,10 +90,10 @@ model Endpoint {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  tenant           Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  client           Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  vulnerabilities  EndpointVulnerability[]
-  complianceChecks ComplianceCheck[]
+  tenant                      Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client                      Client?                       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  vulnerabilities             EndpointVulnerability[]
+  complianceChecks            ComplianceCheck[]
   WindowsComplianceEvaluation WindowsComplianceEvaluation[]
 
   // === WINDOWS COMPLIANCE DATA ===
@@ -146,9 +146,9 @@ model Endpoint {
   adUserPrincipalName         String?
 
   // === WINDOWS COMPLIANCE ===
-  windowsCompliant      Boolean     @default(false)
-  windowsComplianceScore Int?       
-  lastWindowsCheck      DateTime?
+  windowsCompliant       Boolean   @default(false)
+  windowsComplianceScore Int?
+  lastWindowsCheck       DateTime?
 
   // === APP VULNERABILITY STATUS ===
   appsVulnerabilityStatus String? // From SentinelOne
@@ -166,15 +166,15 @@ model Endpoint {
 }
 
 model EndpointSource {
-  id String @id @default(cuid())
+  id         String    @id @default(cuid())
   endpointId String
   sourceType String // 'SENTINELONE', 'NINJAONE', 'PROOFPOINT'
-  sourceId String // External system ID
+  sourceId   String // External system ID
   sourceData Json? // Raw data from source
   lastSynced DateTime?
-  isPrimary Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isPrimary  Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   // Relations
   endpoint Endpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
@@ -410,31 +410,30 @@ model Application {
   @@unique([name, vendor])
 }
 
-
 // ============================================================================
 // WINDOWS COMPLIANCE MODELS (ADD TO EXISTING SCHEMA)
 // ============================================================================
 
 model WindowsVersion {
-  id             String   @id @default(cuid())
-  cycle          String   @unique // e.g., "11-24h2-e", "10-22h2"
-  releaseLabel   String   // e.g., "11 24H2 (E)", "10 22H2"
-  majorVersion   String   // e.g., "11", "10", "Server2022"
-  featureUpdate  String   // e.g., "24H2", "23H2", "22H2"
-  edition        String?  // e.g., "Enterprise", "Home/Pro", "All"
-  releaseDate    DateTime
-  eolDate        DateTime // End of life date
-  supportDate    DateTime // End of support date
-  latestBuild    String   // e.g., "10.0.26100", "10.0.22631"
-  isSupported    Boolean  @default(true)
-  isLTS          Boolean  @default(false) // Long-term support
-  microsoftLink  String?  // Link to Microsoft documentation
-  lastUpdated    DateTime @default(now()) @updatedAt
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  cycle         String   @unique // e.g., "11-24h2-e", "10-22h2"
+  releaseLabel  String // e.g., "11 24H2 (E)", "10 22H2"
+  majorVersion  String // e.g., "11", "10", "Server2022"
+  featureUpdate String // e.g., "24H2", "23H2", "22H2"
+  edition       String? // e.g., "Enterprise", "Home/Pro", "All"
+  releaseDate   DateTime
+  eolDate       DateTime // End of life date
+  supportDate   DateTime // End of support date
+  latestBuild   String // e.g., "10.0.26100", "10.0.22631"
+  isSupported   Boolean  @default(true)
+  isLTS         Boolean  @default(false) // Long-term support
+  microsoftLink String? // Link to Microsoft documentation
+  lastUpdated   DateTime @default(now()) @updatedAt
+  createdAt     DateTime @default(now())
 
   // Relationships
-  builds       WindowsBuild[]
-  evaluations  WindowsComplianceEvaluation[]
+  builds      WindowsBuild[]
+  evaluations WindowsComplianceEvaluation[]
 
   @@index([majorVersion])
   @@index([featureUpdate])
@@ -444,17 +443,17 @@ model WindowsVersion {
 }
 
 model WindowsCompliancePolicy {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   tenantId    String
   name        String
   description String?
 
   // Core Policy Rules
-  requireSupported    Boolean  @default(true) // Must be supported by Microsoft
-  requireLatestBuild  Boolean  @default(true) // Must have latest build for version
-  allowedVersions     String[] // Array of allowed Windows versions ["11", "10"]
-  minimumVersions     Json?    // {"11": "23H2", "10": "22H2"} - minimum feature updates
-  blockedVersions     String[] // Explicitly blocked versions
+  requireSupported   Boolean  @default(true) // Must be supported by Microsoft
+  requireLatestBuild Boolean  @default(true) // Must have latest build for version
+  allowedVersions    String[] // Array of allowed Windows versions ["11", "10"]
+  minimumVersions    Json? // {"11": "23H2", "10": "22H2"} - minimum feature updates
+  blockedVersions    String[] // Explicitly blocked versions
 
   // Edition Rules
   allowedEditions String[] // ["Enterprise", "Pro", "Education"]
@@ -465,7 +464,7 @@ model WindowsCompliancePolicy {
   requireGABuilds Boolean @default(true) // Only GA builds, no preview
 
   // LTS Rules  
-  allowLTSVersions Boolean @default(true)
+  allowLTSVersions  Boolean @default(true)
   preferLTSVersions Boolean @default(false)
 
   // Compliance Scoring
@@ -481,7 +480,7 @@ model WindowsCompliancePolicy {
   createdAt     DateTime  @default(now())
 
   // Relationships
-  tenant      Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   evaluations WindowsComplianceEvaluation[]
 
   @@index([tenantId])
@@ -505,7 +504,7 @@ model WindowsComplianceEvaluation {
 
   // Compliance Results
   isCompliant     Boolean
-  complianceScore Int     // 0-100
+  complianceScore Int // 0-100
   failureReasons  String[] // Array of failure reasons
   requiredActions String[] // What needs to be done
 
@@ -522,9 +521,11 @@ model WindowsComplianceEvaluation {
   policySnapshot Json? // Snapshot of policy at evaluation time
 
   // Relationships
-  endpoint                 Endpoint                 @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-  WindowsCompliancePolicy  WindowsCompliancePolicy  @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  windowsVersion           WindowsVersion?          @relation(fields: [detectedVersion], references: [majorVersion])
+  endpoint                Endpoint                @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  WindowsCompliancePolicy WindowsCompliancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  // windowsVersion           WindowsVersion?          @relation(fields: [detectedVersion], references: [majorVersion])
+  WindowsVersion          WindowsVersion?         @relation(fields: [windowsVersionId], references: [id])
+  windowsVersionId        String?
 
   @@index([endpointId])
   @@index([evaluatedAt])
@@ -533,20 +534,20 @@ model WindowsComplianceEvaluation {
 }
 
 model WindowsBuild {
-  id            String   @id @default(cuid())
-  versionId     String   // References WindowsVersion
-  buildNumber   String   // e.g., "26100.2152"
-  majorBuild    String   // e.g., "10.0.26100"
-  minorBuild    String?  // e.g., "2152"
+  id            String    @id @default(cuid())
+  versionId     String // References WindowsVersion
+  buildNumber   String // e.g., "26100.2152"
+  majorBuild    String // e.g., "10.0.26100"
+  minorBuild    String? // e.g., "2152"
   buildDate     DateTime?
-  isGA          Boolean  @default(true) // General Availability
-  isPreview     Boolean  @default(false)
-  kbNumber      String?  // KB article number
+  isGA          Boolean   @default(true) // General Availability
+  isPreview     Boolean   @default(false)
+  kbNumber      String? // KB article number
   releaseNotes  String?
-  securityFixes Int      @default(0)
-  bugFixes      Int      @default(0)
-  isLatest      Boolean  @default(false) // Latest for this version
-  createdAt     DateTime @default(now())
+  securityFixes Int       @default(0)
+  bugFixes      Int       @default(0)
+  isLatest      Boolean   @default(false) // Latest for this version
+  createdAt     DateTime  @default(now())
 
   // Relationships
   version WindowsVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
@@ -556,7 +557,6 @@ model WindowsBuild {
   @@index([isLatest])
   @@index([isGA])
 }
-
 
 // ============================================================================
 // ENUMS

@@ -3,6 +3,7 @@ import { tenantRouter } from "~/server/api/routers/tenant";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 import { sentinelOneRouter } from "~/server/api/routers/sentinelone-enhanced";
 import { windowsComplianceRouter } from "./routers/windows-compliance";
+import { cveManagementRouter } from "./routers/cve-management";
 
 /**
  * This is the primary router for your server.
@@ -14,6 +15,7 @@ export const appRouter = createTRPCRouter({
   tenant: tenantRouter,
   sentinelOne: sentinelOneRouter,
   windowsCompliance: windowsComplianceRouter,
+  cveManagement: cveManagementRouter,
 });
 
 // export type definition of API

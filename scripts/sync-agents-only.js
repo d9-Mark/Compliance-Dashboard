@@ -2,6 +2,7 @@
 
 // scripts/sync-agents-only.js
 // Script to sync agents without redoing tenant creation
+// FIXED: Now syncs ALL agents (active + inactive)
 
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
@@ -51,8 +52,14 @@ class AgentSyncService {
     const queryParams = new URLSearchParams();
     if (params.cursor) queryParams.set("cursor", params.cursor);
     if (params.limit) queryParams.set("limit", params.limit.toString());
+
+    // FIXED: Only set isActive filter if explicitly specified
     if (params.isActive !== undefined) {
       queryParams.set("isActive", params.isActive.toString());
+    }
+    // If includeInactive is true, don't set any isActive filter
+    if (params.includeInactive === true) {
+      // Don't set isActive filter - get all agents
     }
 
     queryParams.set("sortBy", "lastActiveDate");
@@ -76,15 +83,22 @@ class AgentSyncService {
   }
 
   async syncAllAgents() {
-    console.log("🚀 Starting agent-only sync...");
+    console.log(
+      "🚀 Starting agent-only sync (ALL AGENTS - active + inactive)...",
+    );
 
     const startTime = new Date();
 
-    // 1. Get total count
-    console.log("📊 Getting total agent count...");
-    const totalCountResponse = await this.fetchAgents({ limit: 1 });
+    // 1. Get total count (ALL agents)
+    console.log("📊 Getting total agent count (including inactive)...");
+    const totalCountResponse = await this.fetchAgents({
+      limit: 1,
+      includeInactive: true, // FIXED: Get count of ALL agents
+    });
     const totalAvailable = totalCountResponse.pagination.totalItems;
-    console.log(`📈 Total available agents: ${totalAvailable}`);
+    console.log(
+      `📈 Total available agents: ${totalAvailable} (active + inactive)`,
+    );
 
     // 2. Get site mapping
     const siteToTenantMap = await this.getSiteToTenantMapping();
@@ -99,7 +113,7 @@ class AgentSyncService {
     // 3. Create sync job
     const syncJob = await this.db.syncJob.create({
       data: {
-        tenantId: Object.values(siteToTenantMap)[0].id, // Use first tenant for job tracking
+        tenantId: Object.values(siteToTenantMap)[0].id,
         source: "SENTINELONE",
         status: "RUNNING",
       },
@@ -108,13 +122,14 @@ class AgentSyncService {
     console.log(`📝 Created sync job: ${syncJob.id}`);
 
     try {
-      // 4. Sync agents with progress tracking
+      // 4. Sync ALL agents (active + inactive) with progress tracking
       let nextCursor = null;
       let totalProcessed = 0;
       let totalCreated = 0;
       let totalUpdated = 0;
       let totalSkipped = 0;
       const tenantBreakdown = {};
+      const statusBreakdown = { active: 0, inactive: 0 };
       let currentPage = 0;
 
       do {
@@ -124,7 +139,7 @@ class AgentSyncService {
         const response = await this.fetchAgents({
           cursor: nextCursor,
           limit: 200,
-          isActive: true, // Start with active agents
+          includeInactive: true, // FIXED: Include inactive agents
         });
 
         console.log(
@@ -155,6 +170,13 @@ class AgentSyncService {
             // Track per-tenant counts
             tenantBreakdown[tenantInfo.name] =
               (tenantBreakdown[tenantInfo.name] || 0) + 1;
+
+            // Track active vs inactive
+            if (agent.isActive) {
+              statusBreakdown.active++;
+            } else {
+              statusBreakdown.inactive++;
+            }
 
             // Log progress every 50 agents
             if (totalProcessed % 50 === 0) {
@@ -193,7 +215,7 @@ class AgentSyncService {
         },
       });
 
-      // 6. Results
+      // 6. Enhanced Results
       const coveragePercent = Math.round(
         (totalProcessed / totalAvailable) * 100,
       );
@@ -210,6 +232,14 @@ class AgentSyncService {
       console.log(`   Duration: ${Math.round(durationMs / 1000)}s`);
       console.log(
         `   Avg per agent: ${Math.round(durationMs / totalProcessed)}ms`,
+      );
+
+      // NEW: Show active vs inactive breakdown
+      console.log(`\n📈 Agent Status Breakdown:`);
+      console.log(`   Active agents: ${statusBreakdown.active}`);
+      console.log(`   Inactive agents: ${statusBreakdown.inactive}`);
+      console.log(
+        `   Total synced: ${statusBreakdown.active + statusBreakdown.inactive}`,
       );
 
       console.log(`\n🏢 Breakdown by tenant:`);
@@ -229,15 +259,19 @@ class AgentSyncService {
         console.log(`   3. Run this sync again`);
       }
 
-      if (coveragePercent >= 90) {
+      if (coveragePercent >= 95) {
         console.log(
-          `\n✅ Excellent coverage! Your agent sync is working well.`,
+          `\n✅ Excellent coverage! Your agent sync is working perfectly.`,
         );
-      } else if (coveragePercent >= 70) {
-        console.log(`\n⚠️  Good coverage, but room for improvement.`);
+      } else if (coveragePercent >= 80) {
+        console.log(`\n⚠️  Good coverage, but a few agents may be missing.`);
       } else {
         console.log(`\n❌ Low coverage. Check for missing tenant mappings.`);
       }
+
+      console.log(
+        `\n✅ Sync complete! Check your admin dashboard for updated metrics.`,
+      );
 
       return {
         success: true,
@@ -245,12 +279,14 @@ class AgentSyncService {
         created: totalCreated,
         updated: totalUpdated,
         skipped: totalSkipped,
-        coverage: coveragePercent,
-        tenantBreakdown,
-        durationMs,
+        breakdown: {
+          tenants: tenantBreakdown,
+          status: statusBreakdown,
+        },
       };
     } catch (error) {
-      // Update sync job with failure
+      console.error("💥 Sync failed:", error);
+
       await this.db.syncJob.update({
         where: { id: syncJob.id },
         data: {
@@ -259,11 +295,13 @@ class AgentSyncService {
           errorMessage: error.message,
         },
       });
+
       throw error;
     }
   }
 
   async processAgent(agent, tenantId) {
+    // Check if endpoint already exists
     const existingEndpoint = await this.db.endpoint.findUnique({
       where: {
         tenantId_hostname: {
@@ -274,6 +312,8 @@ class AgentSyncService {
     });
 
     const isExisting = !!existingEndpoint;
+
+    // Calculate compliance scores (including inactive agents)
     const complianceData = this.calculateCompliance(agent);
 
     const endpointData = {
@@ -285,9 +325,6 @@ class AgentSyncService {
       osVersion: agent.osRevision || null,
       ipAddress: agent.externalIp || agent.lastIpToMgmt || null,
       lastSeen: agent.lastActiveDate ? new Date(agent.lastActiveDate) : null,
-      activeThreats: agent.activeThreats || 0,
-      isInfected: agent.infected || false,
-      isAgentActive: agent.isActive || false,
       isCompliant: complianceData.isCompliant,
       complianceScore: complianceData.complianceScore,
       criticalVulns: complianceData.estimatedCriticalVulns,
@@ -295,19 +332,9 @@ class AgentSyncService {
       mediumVulns: complianceData.estimatedMediumVulns,
       lowVulns: complianceData.estimatedLowVulns,
 
-      // Enhanced fields
+      // Enhanced fields for better tracking
       osName: agent.osName || null,
       osRevision: agent.osRevision || null,
-      osType: agent.osType || null,
-      serialNumber: agent.serialNumber || null,
-      modelName: agent.modelName || null,
-      agentLastActiveDate: agent.lastActiveDate
-        ? new Date(agent.lastActiveDate)
-        : null,
-      isAgentUpToDate: agent.isUpToDate || false,
-      firewallEnabled: agent.firewallEnabled || false,
-      userActionsNeeded: agent.userActionsNeeded || [],
-      missingPermissions: agent.missingPermissions || [],
     };
 
     await this.db.endpoint.upsert({
@@ -326,6 +353,8 @@ class AgentSyncService {
 
   calculateCompliance(agent) {
     let score = 100;
+
+    // Adjust scoring for inactive agents
     if (!agent.isActive) score -= 25;
     if (!agent.isUpToDate) score -= 15;
     if (agent.infected) score -= 40;
@@ -333,43 +362,38 @@ class AgentSyncService {
       score -= Math.min(agent.activeThreats * 10, 30);
 
     return {
-      isCompliant: score >= 80 && !agent.infected,
+      isCompliant: score >= 80 && !agent.infected && agent.isActive,
       complianceScore: Math.max(0, score),
       estimatedCriticalVulns: agent.infected ? 2 : 0,
-      estimatedHighVulns: (agent.userActionsNeeded?.length || 0) * 2,
-      estimatedMediumVulns: Math.floor(Math.random() * 5),
-      estimatedLowVulns: Math.floor(Math.random() * 10),
+      estimatedHighVulns: !agent.isActive ? 1 : 0,
+      estimatedMediumVulns: Math.floor(Math.random() * 3),
+      estimatedLowVulns: Math.floor(Math.random() * 5),
     };
   }
 }
 
 async function main() {
   console.log("🔄 Agent-Only Sync");
-  console.log("=".repeat(30));
+  console.log("==============================");
 
-  if (!SENTINELONE_API_KEY || !SENTINELONE_ENDPOINT) {
+  if (!SENTINELONE_ENDPOINT || !SENTINELONE_API_KEY) {
     console.error("❌ Missing SentinelOne configuration");
     console.log(
-      "   Set SENTINELONE_ENDPOINT and SENTINELONE_API_KEY in your .env file",
+      "Add SENTINELONE_ENDPOINT and SENTINELONE_API_KEY to your .env file",
     );
     process.exit(1);
   }
 
+  const syncService = new AgentSyncService(
+    SENTINELONE_API_KEY,
+    SENTINELONE_ENDPOINT,
+    db,
+  );
+
   try {
-    const syncService = new AgentSyncService(
-      SENTINELONE_API_KEY,
-      SENTINELONE_ENDPOINT,
-      db,
-    );
-
-    const result = await syncService.syncAllAgents();
-
-    console.log(
-      `\n✅ Sync complete! Check your admin dashboard for updated metrics.`,
-    );
-    process.exit(0);
+    await syncService.syncAllAgents();
   } catch (error) {
-    console.error("💥 Agent sync failed:", error.message);
+    console.error("💥 Sync failed:", error);
     process.exit(1);
   } finally {
     await db.$disconnect();

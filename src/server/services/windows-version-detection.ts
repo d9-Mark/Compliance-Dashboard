@@ -33,59 +33,97 @@ interface ComplianceEvaluation {
 export class WindowsVersionDetectionService {
   constructor(private readonly db: PrismaClient) {}
 
+  // Update your WindowsVersionDetectionService parseWindowsVersion method
+  // in src/server/services/windows-version-detection.ts
+
   /**
-   * Parse Windows version info from SentinelOne agent data
+   * Parse Windows version info from SentinelOne agent data - UPDATED for new field structure
    */
   async parseWindowsVersion(
-    osName: string,
-    osRevision: string,
+    operatingSystem: string, // CHANGED: was osName, now operatingSystem
+    osVersion: string, // CHANGED: was osRevision, now osVersion (build number)
   ): Promise<WindowsVersionInfo | null> {
-    if (!osName || !this.isWindowsOS(osName)) {
+    if (!operatingSystem || !this.isWindowsOS(operatingSystem)) {
       return null;
     }
 
-    // Parse major version (11, 10, etc.)
-    const majorVersion = this.extractMajorVersion(osName);
+    // Parse major version from operatingSystem (e.g., "Windows 11 Pro" -> "11")
+    const majorVersionMatch = operatingSystem.match(/Windows (\d+)/i);
+    const majorVersion = majorVersionMatch ? majorVersionMatch[1] : null;
+
     if (!majorVersion) {
       return null;
     }
 
-    // Parse build number
-    const buildInfo = this.parseBuildNumber(osRevision);
-    if (!buildInfo) {
+    // Parse edition from operatingSystem (e.g., "Windows 11 Pro" -> "Pro")
+    const editionMatch = operatingSystem.match(/Windows \d+\s+(.+)/i);
+    const edition = editionMatch ? editionMatch[1].trim() : "Unknown";
+
+    // osVersion now contains just the build number (e.g., "26100")
+    const buildNumber = osVersion ? parseInt(osVersion, 10) : null;
+
+    if (!buildNumber) {
+      console.warn(`Invalid build number: ${osVersion} for ${operatingSystem}`);
       return null;
     }
 
-    // Determine feature update based on build number
-    const featureUpdate = await this.determineFeatureUpdate(
-      majorVersion,
-      buildInfo.majorBuild,
-    );
+    // Get Windows version info from database to determine feature update
+    const windowsVersions = await this.db.windowsVersion.findMany({
+      where: {
+        majorVersion: majorVersion,
+        isSupported: true,
+      },
+      orderBy: { releaseDate: "desc" },
+    });
 
-    // Determine edition
-    const edition = this.extractEdition(osName);
+    // Find matching version by build number
+    let matchedVersion = null;
+    let featureUpdate = "Unknown";
 
-    // Check if this build is supported and latest
-    const versionStatus = await this.getVersionStatus(
-      majorVersion,
-      featureUpdate,
-      buildInfo.majorBuild,
-    );
+    for (const version of windowsVersions) {
+      // Extract build number from version.latestBuild (e.g., "10.0.26100.2152" -> 26100)
+      const versionBuildMatch = version.latestBuild.match(/\d+\.\d+\.(\d+)/);
+      const versionBuildNumber = versionBuildMatch
+        ? parseInt(versionBuildMatch[1], 10)
+        : null;
+
+      if (versionBuildNumber && buildNumber >= versionBuildNumber) {
+        matchedVersion = version;
+        featureUpdate = version.featureUpdate;
+        break;
+      }
+    }
+
+    // Check if this is the latest build
+    const latestVersion = windowsVersions[0];
+    const latestBuildMatch =
+      latestVersion?.latestBuild.match(/\d+\.\d+\.(\d+)/);
+    const latestBuildNumber = latestBuildMatch
+      ? parseInt(latestBuildMatch[1], 10)
+      : null;
+    const isLatestBuild = latestBuildNumber
+      ? buildNumber >= latestBuildNumber
+      : false;
+
+    // Calculate how many builds behind (rough estimate)
+    const buildAgeDays =
+      latestBuildNumber && buildNumber < latestBuildNumber
+        ? Math.max(0, latestBuildNumber - buildNumber)
+        : null;
 
     return {
       majorVersion,
-      featureUpdate: featureUpdate || "Unknown",
+      featureUpdate,
       edition,
-      build: osRevision,
-      majorBuild: buildInfo.majorBuild,
-      minorBuild: buildInfo.minorBuild,
-      isSupported: versionStatus.isSupported,
-      isLatestBuild: versionStatus.isLatestBuild,
-      buildAgeDays: versionStatus.buildAgeDays,
-      recommendedBuild: versionStatus.recommendedBuild,
+      build: osVersion, // The full build number as string
+      majorBuild: `10.0.${buildNumber}`, // Reconstruct major build
+      minorBuild: "0", // We don't have minor build info
+      isSupported: matchedVersion ? matchedVersion.isSupported : false,
+      isLatestBuild,
+      buildAgeDays,
+      recommendedBuild: latestVersion?.latestBuild || null,
     };
   }
-
   /**
    * Evaluate Windows compliance against a policy
    */
@@ -248,39 +286,62 @@ export class WindowsVersionDetectionService {
     return evaluation;
   }
 
+  // Update the storeEvaluation method in WindowsVersionDetectionService
+  // to use the correct field names
+
   /**
-   * Store compliance evaluation in database
+   * Store compliance evaluation results - UPDATED for new field structure
    */
   async storeEvaluation(
     endpointId: string,
     policyId: string,
     windowsInfo: WindowsVersionInfo,
     evaluation: ComplianceEvaluation,
-    rawOsData: { osName: string; osRevision: string },
+    rawData: {
+      operatingSystem: string; // CHANGED: was osName
+      osVersion: string; // CHANGED: was osRevision
+    },
   ): Promise<void> {
-    await this.db.windowsComplianceEvaluation.create({
-      data: {
-        endpointId,
-        policyId,
-        detectedVersion: windowsInfo.majorVersion,
-        detectedFeatureUpdate: windowsInfo.featureUpdate,
-        detectedEdition: windowsInfo.edition,
-        detectedBuild: windowsInfo.build,
-        osName: rawOsData.osName,
-        osRevision: rawOsData.osRevision,
-        isCompliant: evaluation.isCompliant,
-        complianceScore: evaluation.complianceScore,
-        failureReasons: evaluation.failureReasons,
-        requiredActions: evaluation.requiredActions,
-        isSupportedVersion: evaluation.isSupportedVersion,
-        isLatestBuild: evaluation.isLatestBuild,
-        isAllowedVersion: evaluation.isAllowedVersion,
-        isAllowedEdition: evaluation.isAllowedEdition,
-        buildAgeDays: evaluation.buildAgeDays,
-        recommendedVersion: evaluation.recommendedVersion,
-        recommendedBuild: evaluation.recommendedBuild,
-      },
-    });
+    try {
+      await this.db.windowsComplianceEvaluation.create({
+        data: {
+          id: `eval-${endpointId}-${Date.now()}`,
+          endpointId,
+          policyId,
+          evaluatedAt: new Date(),
+
+          // Evaluation Results
+          isCompliant: evaluation.isCompliant,
+          complianceScore: evaluation.complianceScore,
+          failureReasons: evaluation.failureReasons,
+          requiredActions: evaluation.requiredActions,
+
+          // Detected Version Info
+          detectedVersion: windowsInfo.majorVersion,
+          detectedFeatureUpdate: windowsInfo.featureUpdate,
+          detectedEdition: windowsInfo.edition,
+          detectedBuild: windowsInfo.build,
+          detectedMajorBuild: windowsInfo.majorBuild,
+
+          // Compliance Details
+          isSupportedVersion: evaluation.isSupportedVersion,
+          isLatestBuild: evaluation.isLatestBuild,
+          buildAgeDays: windowsInfo.buildAgeDays,
+          recommendedVersion: evaluation.recommendedVersion,
+          recommendedBuild: evaluation.recommendedBuild,
+
+          // Raw OS Data (for debugging) - UPDATED field names
+          rawOSName: rawData.operatingSystem, // CHANGED: store operatingSystem
+          rawOSRevision: rawData.osVersion, // CHANGED: store osVersion
+        },
+      });
+    } catch (error) {
+      console.error(
+        `Failed to store evaluation for endpoint ${endpointId}:`,
+        error,
+      );
+      throw error;
+    }
   }
 
   // Private helper methods

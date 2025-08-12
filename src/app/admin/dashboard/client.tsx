@@ -1,5 +1,5 @@
+// src/app/admin/dashboard/client.tsx - Restored with CVE addition
 "use client";
-// src/app/admin/dashboard/client.tsx - Professional Admin Dashboard with Windows Compliance & Threat Management
 
 import { useState } from "react";
 import { api } from "~/trpc/react";
@@ -12,742 +12,556 @@ interface AdminDashboardClientProps {
 
 export function AdminDashboardClient({ session }: AdminDashboardClientProps) {
   const [activeTab, setActiveTab] = useState<
-    "overview" | "security" | "compliance" | "tenants" | "sentinelone"
+    | "overview"
+    | "security"
+    | "compliance"
+    | "tenants"
+    | "sentinelone"
+    | "vulnerabilities"
   >("overview");
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
 
-  // Data queries
+  // Existing data queries that work
   const {
     data: tenantData,
     isLoading: tenantsLoading,
     refetch: refetchTenants,
   } = api.tenant.getTenantsByType.useQuery();
+
   const { data: overview, isLoading: overviewLoading } =
     api.tenant.getOverview.useQuery(
       { tenantId: selectedTenantId! },
       { enabled: !!selectedTenantId },
     );
+
   const { data: diagnostics } = api.sentinelOne.getDiagnostics.useQuery();
 
-  // Mutations
+  // CVE-related queries (safe with error handling)
+  const {
+    data: cveStats,
+    refetch: refetchCveStats,
+    error: cveStatsError,
+    isLoading: cveStatsLoading,
+  } = api.cveManagement?.getSyncStatistics?.useQuery(undefined, {
+    enabled: !!api.cveManagement?.getSyncStatistics,
+    retry: false,
+  }) || { data: null, refetch: () => {}, error: null, isLoading: false };
+
+  const { data: cveSyncHistory, error: cveSyncHistoryError } =
+    api.cveManagement?.getSyncHistory?.useQuery(
+      { limit: 5 },
+      {
+        enabled: !!api.cveManagement?.getSyncHistory,
+        retry: false,
+      },
+    ) || { data: null, error: null };
+
+  // Existing mutations
   const { mutate: testConnection, isPending: testingConnection } =
     api.sentinelOne.testConnection.useMutation();
+
   const { mutate: fullSync, isPending: fullSyncing } =
     api.sentinelOne.fullSync.useMutation({
       onSuccess: () => refetchTenants(),
     });
 
-  const isSyncing = fullSyncing;
+  // CVE mutations (safe)
+  const { mutate: syncCVEs, isPending: cveSyncing } =
+    api.cveManagement?.syncAllCVEs?.useMutation({
+      onSuccess: () => {
+        refetchCveStats();
+        refetchTenants();
+      },
+      onError: (error) => {
+        console.error("CVE sync failed:", error);
+      },
+    }) || { mutate: () => {}, isPending: false };
 
-  // Calculate global metrics
-  const globalMetrics = tenantData
-    ? {
-        totalEndpoints: tenantData.all.reduce(
-          (sum, t) => sum + t._count.endpoints,
-          0,
-        ),
-        totalUsers: tenantData.all.reduce((sum, t) => sum + t._count.users, 0),
-        sentinelOneConnected: tenantData.summary.sentinelOneCount,
-        testTenants: tenantData.summary.testCount,
-      }
+  const isSyncing = fullSyncing || cveSyncing;
+
+  // FIXED: Calculate global metrics using the correct data structure
+  const globalMetrics = tenantData?.all
+    ? (() => {
+        const allTenants = tenantData.all; // This is the actual array
+        return {
+          totalTenants: allTenants.length,
+          totalEndpoints: allTenants.reduce(
+            (sum, t) => sum + (t.endpoints?.length || 0),
+            0,
+          ),
+          averageCompliance:
+            allTenants.length > 0
+              ? Math.round(
+                  allTenants.reduce((sum, t) => {
+                    const endpoints = t.endpoints || [];
+                    const tenantAvg =
+                      endpoints.length > 0
+                        ? endpoints.reduce(
+                            (eSum, e) => eSum + (e.complianceScore || 0),
+                            0,
+                          ) / endpoints.length
+                        : 0;
+                    return sum + tenantAvg;
+                  }, 0) / allTenants.length,
+                )
+              : 0,
+          totalThreats: allTenants.reduce(
+            (sum, t) =>
+              sum +
+              (t.endpoints || []).reduce(
+                (eSum, e) => eSum + (e.activeThreats || 0),
+                0,
+              ),
+            0,
+          ),
+          totalVulnerabilities: cveStats?.totalEndpointVulnerabilities || 0,
+          criticalVulns: cveStats?.vulnerabilitiesBySeverity?.CRITICAL || 0,
+        };
+      })()
     : null;
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Enhanced Header with Live Status */}
-      <div className="border-b bg-white/80 shadow-sm backdrop-blur-md">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600">
-                  <span className="text-xl font-bold text-white">D9</span>
-                </div>
-                <div>
-                  <h1 className="bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-2xl font-bold text-transparent">
-                    Compliance Control Center
-                  </h1>
-                  <p className="text-sm text-gray-500">
-                    Administrative Dashboard • {session.user.name}
-                  </p>
-                </div>
-              </div>
+  const cveAvailable = !!api.cveManagement?.getSyncStatistics;
 
-              {/* Live System Status */}
-              <div className="ml-8 hidden items-center space-x-6 lg:flex">
-                <StatusIndicator
-                  label="SentinelOne"
-                  status={
-                    diagnostics?.api.connected ? "connected" : "disconnected"
-                  }
-                  value={diagnostics?.api.totalAgentsAvailable || 0}
-                />
-                <StatusIndicator
-                  label="Tenants"
-                  status="healthy"
-                  value={tenantData?.summary.total || 0}
-                />
-                <StatusIndicator
-                  label="Coverage"
-                  status={
-                    diagnostics?.analysis.coveragePercentage >= 80
-                      ? "healthy"
-                      : "warning"
-                  }
-                  value={`${diagnostics?.analysis.coveragePercentage || 0}%`}
-                />
+  // RESTORED: Original Overview component
+  const renderOverview = () => {
+    if (!selectedTenantId) {
+      return (
+        <div className="space-y-6">
+          {/* CVE Status Alert */}
+          {cveAvailable && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <span className="text-blue-400">🛡️</span>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-blue-800">
+                    CVE Integration Active
+                  </h3>
+                  <div className="mt-2 text-sm text-blue-700">
+                    <p>
+                      CVE management is ready.{" "}
+                      {cveStats
+                        ? `${cveStats.totalVulnerabilities} vulnerabilities tracked.`
+                        : "Run initial sync to import CVE data."}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
+          )}
 
-            <div className="flex items-center space-x-3">
-              {isSyncing && (
-                <div className="flex items-center space-x-2 rounded-full bg-blue-100 px-3 py-1.5 text-sm text-blue-700">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-blue-500"></div>
-                  Syncing
+          {/* Debug Info (remove this after fixing) */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div className="text-sm">
+              <div>🔍 Debug Info:</div>
+              <div>Tenant Data Type: {typeof tenantData}</div>
+              <div>Has .all property: {tenantData?.all ? "Yes" : "No"}</div>
+              <div>All Tenants Count: {tenantData?.all?.length || 0}</div>
+              <div>
+                SentinelOne Tenants: {tenantData?.sentinelOne?.length || 0}
+              </div>
+              <div>Test Tenants: {tenantData?.test?.length || 0}</div>
+              <div>CVE Available: {cveAvailable ? "Yes" : "No"}</div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border p-6">
+            <h3 className="mb-6 text-lg font-semibold">
+              Select a tenant to view overview
+            </h3>
+            <div className="grid gap-4">
+              {tenantData?.all?.length > 0 ? (
+                tenantData.all.map((tenant) => (
+                  <button
+                    key={tenant.id}
+                    onClick={() => setSelectedTenantId(tenant.id)}
+                    className="flex items-center justify-between rounded-lg border p-4 text-left hover:bg-gray-50"
+                  >
+                    <div>
+                      <h4 className="font-medium">{tenant.name}</h4>
+                      <p className="text-sm text-gray-600">
+                        {tenant.endpoints?.length || 0} endpoints
+                      </p>
+                    </div>
+                    <div className="text-sm text-blue-600">View →</div>
+                  </button>
+                ))
+              ) : (
+                <div className="py-8 text-center text-gray-500">
+                  <div className="mb-2 text-4xl">🏢</div>
+                  <p>
+                    No tenants found. Set up SentinelOne integration to sync
+                    tenants.
+                  </p>
                 </div>
               )}
-              <Link
-                href="/auth/signout"
-                className="rounded-lg bg-gray-100 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-200"
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (overviewLoading) {
+      return <div className="text-center">Loading overview...</div>;
+    }
+
+    if (!overview) {
+      return (
+        <div className="text-center text-red-600">Failed to load overview</div>
+      );
+    }
+
+    // RESTORED: Original overview with added CVE data
+    return (
+      <div className="space-y-6">
+        <OverviewStatsGrid overview={overview} cveStats={cveStats} />
+        <TenantThreatsList tenantData={tenantData?.all || []} />
+      </div>
+    );
+  };
+
+  // NEW: CVE Management Tab
+  const renderVulnerabilities = () => {
+    if (!cveAvailable) {
+      return (
+        <div className="rounded-lg bg-white shadow">
+          <div className="border-b border-gray-200 px-6 py-4">
+            <h3 className="text-lg font-medium text-gray-900">
+              CVE Management Setup Required
+            </h3>
+          </div>
+          <div className="p-6">
+            <div className="text-center">
+              <div className="mb-4 text-6xl">🚧</div>
+              <h3 className="mb-2 text-lg font-medium text-gray-900">
+                CVE Integration Not Configured
+              </h3>
+              <p className="mb-6 text-gray-600">
+                Complete the CVE router setup to enable vulnerability
+                management.
+              </p>
+              <div className="mx-auto max-w-md space-y-2 text-left">
+                <p className="text-sm font-medium text-gray-900">
+                  Setup Steps:
+                </p>
+                <ol className="list-inside list-decimal space-y-1 text-sm text-gray-600">
+                  <li>Add CVE management router to your tRPC setup</li>
+                  <li>Create the CVE service files</li>
+                  <li>
+                    Run{" "}
+                    <code className="rounded bg-gray-100 px-1">
+                      npx prisma generate
+                    </code>
+                  </li>
+                  <li>Restart your development server</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* CVE Management Header */}
+        <div className="rounded-lg bg-white shadow">
+          <div className="border-b border-gray-200 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium text-gray-900">
+                CVE Management
+              </h3>
+              <button
+                onClick={() => syncCVEs()}
+                disabled={cveSyncing}
+                className={`inline-flex items-center rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white shadow-sm ${
+                  cveSyncing
+                    ? "cursor-not-allowed bg-gray-400"
+                    : "bg-red-600 hover:bg-red-700"
+                }`}
               >
-                Sign Out
-              </Link>
+                {cveSyncing ? "🔄 Syncing CVEs..." : "🔄 Sync All CVEs"}
+              </button>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {cveStatsLoading ? (
+              <div className="py-8 text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+                <p className="mt-2 text-gray-600">Loading CVE statistics...</p>
+              </div>
+            ) : cveStats ? (
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                {/* Statistics */}
+                <div>
+                  <h4 className="text-md mb-4 font-medium text-gray-900">
+                    Current Statistics
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-lg bg-red-50 p-4 text-center">
+                      <div className="text-2xl font-bold text-red-600">
+                        {cveStats.vulnerabilitiesBySeverity?.CRITICAL || 0}
+                      </div>
+                      <div className="text-sm text-red-700">Critical</div>
+                    </div>
+                    <div className="rounded-lg bg-orange-50 p-4 text-center">
+                      <div className="text-2xl font-bold text-orange-600">
+                        {cveStats.vulnerabilitiesBySeverity?.HIGH || 0}
+                      </div>
+                      <div className="text-sm text-orange-700">High</div>
+                    </div>
+                    <div className="rounded-lg bg-yellow-50 p-4 text-center">
+                      <div className="text-2xl font-bold text-yellow-600">
+                        {cveStats.vulnerabilitiesBySeverity?.MEDIUM || 0}
+                      </div>
+                      <div className="text-sm text-yellow-700">Medium</div>
+                    </div>
+                    <div className="rounded-lg bg-green-50 p-4 text-center">
+                      <div className="text-2xl font-bold text-green-600">
+                        {cveStats.vulnerabilitiesBySeverity?.LOW || 0}
+                      </div>
+                      <div className="text-sm text-green-700">Low</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Info */}
+                <div>
+                  <h4 className="text-md mb-4 font-medium text-gray-900">
+                    Quick Info
+                  </h4>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                      <span>Total Vulnerabilities:</span>
+                      <span>
+                        {cveStats.totalVulnerabilities?.toLocaleString() || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Active Issues:</span>
+                      <span>
+                        {cveStats.totalEndpointVulnerabilities?.toLocaleString() ||
+                          0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Recent (7d):</span>
+                      <span>{cveStats.recentlyDetected || 0}</span>
+                    </div>
+                    <div className="border-t pt-2">
+                      <div className="text-xs text-gray-500">
+                        Last updated: {new Date().toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center">
+                <div className="mb-4 text-6xl">📊</div>
+                <h3 className="mb-2 text-lg font-medium text-gray-900">
+                  No CVE Data
+                </h3>
+                <p className="mb-4 text-gray-600">
+                  Click "Sync All CVEs" to import vulnerability data from
+                  SentinelOne.
+                </p>
+                <p className="text-sm text-gray-500">
+                  This will import 107,523+ CVE records and may take 30-60
+                  minutes.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sync History */}
+        {cveSyncHistory && cveSyncHistory.length > 0 && (
+          <div className="rounded-lg bg-white shadow">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-medium text-gray-900">
+                Recent CVE Sync History
+              </h3>
+            </div>
+            <div className="p-6">
+              <div className="space-y-3">
+                {cveSyncHistory.map((job: any) => (
+                  <div
+                    key={job.id}
+                    className="flex items-center justify-between border-b border-gray-100 py-2 last:border-b-0"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">
+                        CVE Sync - {new Date(job.startedAt).toLocaleString()}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {job.recordsProcessed.toLocaleString()} records
+                        processed
+                        {job.completedAt &&
+                          ` in ${Math.round((new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime()) / 1000)}s`}
+                      </div>
+                    </div>
+                    <div
+                      className={`rounded-full px-2 py-1 text-xs font-medium ${
+                        job.status === "COMPLETED"
+                          ? "bg-green-100 text-green-800"
+                          : job.status === "RUNNING"
+                            ? "bg-blue-100 text-blue-800"
+                            : job.status === "FAILED"
+                              ? "bg-red-100 text-red-800"
+                              : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      {job.status}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // RESTORED: Original Security Tab (you can customize this)
+  const renderSecurity = () => (
+    <div className="space-y-6">
+      <div className="rounded-lg border p-6">
+        <h3 className="mb-4 text-lg font-semibold">Security Overview</h3>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-lg border p-4">
+            <h4 className="font-medium text-gray-700">Active Threats</h4>
+            <div className="mt-2 text-2xl font-bold text-red-600">
+              {globalMetrics?.totalThreats || 0}
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <h4 className="font-medium text-gray-700">Critical CVEs</h4>
+            <div className="mt-2 text-2xl font-bold text-orange-600">
+              {globalMetrics?.criticalVulns || 0}
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <h4 className="font-medium text-gray-700">Compliance Rate</h4>
+            <div className="mt-2 text-2xl font-bold text-green-600">
+              {globalMetrics?.averageCompliance || 0}%
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // RESTORED: Original Compliance Tab
+  const renderCompliance = () => (
+    <div className="space-y-6">
+      <div className="rounded-lg border p-6">
+        <h3 className="mb-4 text-lg font-semibold">Compliance Management</h3>
+        <p className="text-gray-600">
+          Compliance monitoring and Windows version tracking functionality.
+        </p>
+      </div>
+    </div>
+  );
+
+  // RESTORED: Original Tenants Tab
+  const renderTenants = () => (
+    <TenantManagementTab
+      tenantData={tenantData?.all || []}
+      tenantsLoading={tenantsLoading}
+      onDeleteClick={setShowDeleteModal}
+    />
+  );
+
+  // RESTORED: Original SentinelOne Tab
+  const renderSentinelOne = () => (
+    <SentinelOneTab
+      diagnostics={diagnostics}
+      testConnection={testConnection}
+      testingConnection={testingConnection}
+      fullSync={fullSync}
+      isSyncing={isSyncing}
+    />
+  );
+
+  if (tenantsLoading) {
+    return <div className="p-8 text-center">Loading dashboard...</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow">
+        <div className="px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 justify-between">
+            <div className="flex items-center">
+              <h1 className="text-xl font-semibold text-gray-900">
+                Admin Dashboard
+              </h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-500">
+                Welcome, {session.user?.email}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Enhanced Navigation */}
-      <div className="border-b bg-white/60 backdrop-blur-sm">
-        <div className="container mx-auto px-6">
+      {/* Navigation */}
+      <div className="bg-white shadow">
+        <div className="px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-8">
-            <TabButton
-              active={activeTab === "overview"}
-              onClick={() => setActiveTab("overview")}
-              icon="📊"
-              label="System Overview"
-              badge={globalMetrics?.totalEndpoints}
-            />
-            <TabButton
-              active={activeTab === "security"}
-              onClick={() => setActiveTab("security")}
-              icon="🛡️"
-              label="Security & Threats"
-              badge={diagnostics?.analysis.missingAgents || 0}
-              urgent={diagnostics?.analysis.missingAgents > 0}
-            />
-            <TabButton
-              active={activeTab === "compliance"}
-              onClick={() => setActiveTab("compliance")}
-              icon="🪟"
-              label="Windows Compliance"
-              badge={tenantData?.summary.testCount}
-              badgeColor="orange"
-            />
-            <TabButton
-              active={activeTab === "tenants"}
-              onClick={() => setActiveTab("tenants")}
-              icon="🏢"
-              label="Tenant Management"
-            />
-            <TabButton
-              active={activeTab === "sentinelone"}
-              onClick={() => setActiveTab("sentinelone")}
-              icon="🔗"
-              label="SentinelOne"
-              loading={isSyncing}
-            />
+            {[
+              { key: "overview", label: "Overview", icon: "📊" },
+              { key: "security", label: "Security", icon: "🔒" },
+              { key: "vulnerabilities", label: "Vulnerabilities", icon: "🛡️" },
+              { key: "compliance", label: "Compliance", icon: "✅" },
+              { key: "tenants", label: "Tenants", icon: "🏢" },
+              { key: "sentinelone", label: "SentinelOne", icon: "🔗" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key as any)}
+                className={`border-b-2 px-1 py-4 text-sm font-medium ${
+                  activeTab === tab.key
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                }`}
+              >
+                <span className="mr-2">{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
           </nav>
         </div>
       </div>
 
-      {/* Tab Content */}
-      <div className="container mx-auto px-6 py-8">
-        {activeTab === "overview" && (
-          <SystemOverviewTab
-            tenantData={tenantData}
-            globalMetrics={globalMetrics}
-            diagnostics={diagnostics}
-            selectedTenantId={selectedTenantId}
-            setSelectedTenantId={setSelectedTenantId}
-            overview={overview}
-            overviewLoading={overviewLoading}
-          />
-        )}
-
-        {activeTab === "security" && (
-          <SecurityThreatsTab
-            tenantData={tenantData}
-            diagnostics={diagnostics}
-          />
-        )}
-
-        {activeTab === "compliance" && (
-          <WindowsComplianceTab
-            tenantData={tenantData}
-            selectedTenantId={selectedTenantId}
-            setSelectedTenantId={setSelectedTenantId}
-          />
-        )}
-
-        {activeTab === "tenants" && (
-          <TenantManagementTab
-            tenantData={tenantData}
-            tenantsLoading={tenantsLoading}
-            onDeleteClick={setShowDeleteModal}
-          />
-        )}
-
-        {activeTab === "sentinelone" && (
-          <SentinelOneTab
-            diagnostics={diagnostics}
-            testConnection={testConnection}
-            testingConnection={testingConnection}
-            fullSync={fullSync}
-            isSyncing={isSyncing}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Enhanced Status Indicator Component
-function StatusIndicator({
-  label,
-  status,
-  value,
-}: {
-  label: string;
-  status: "connected" | "disconnected" | "healthy" | "warning" | "error";
-  value: string | number;
-}) {
-  const statusConfig = {
-    connected: {
-      color: "text-green-600",
-      bg: "bg-green-100",
-      indicator: "bg-green-500",
-    },
-    healthy: {
-      color: "text-green-600",
-      bg: "bg-green-100",
-      indicator: "bg-green-500",
-    },
-    warning: {
-      color: "text-orange-600",
-      bg: "bg-orange-100",
-      indicator: "bg-orange-500",
-    },
-    error: { color: "text-red-600", bg: "bg-red-100", indicator: "bg-red-500" },
-    disconnected: {
-      color: "text-red-600",
-      bg: "bg-red-100",
-      indicator: "bg-red-500",
-    },
-  };
-
-  const config = statusConfig[status];
-
-  return (
-    <div
-      className={`flex items-center space-x-2 rounded-lg ${config.bg} px-3 py-1.5`}
-    >
-      <div
-        className={`h-2 w-2 rounded-full ${config.indicator} ${status === "connected" || status === "healthy" ? "animate-pulse" : ""}`}
-      ></div>
-      <div className="text-sm">
-        <span className="text-gray-600">{label}:</span>
-        <span className={`ml-1 font-semibold ${config.color}`}>{value}</span>
-      </div>
-    </div>
-  );
-}
-
-// Enhanced Tab Button
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-  badge,
-  urgent,
-  badgeColor = "blue",
-  loading,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: string;
-  label: string;
-  badge?: number;
-  urgent?: boolean;
-  badgeColor?: "blue" | "orange" | "red" | "green";
-  loading?: boolean;
-}) {
-  const badgeColors = {
-    blue: "bg-blue-100 text-blue-700",
-    orange: "bg-orange-100 text-orange-700",
-    red: "bg-red-100 text-red-700",
-    green: "bg-green-100 text-green-700",
-  };
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center space-x-2 border-b-2 px-1 py-4 text-sm font-medium transition-all duration-200 ${
-        active
-          ? "border-blue-500 text-blue-600"
-          : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-      }`}
-    >
-      <span className="text-base">{icon}</span>
-      <span>{label}</span>
-      {loading && (
-        <div className="h-2 w-2 animate-spin rounded-full border border-blue-500"></div>
-      )}
-      {badge !== undefined && badge > 0 && (
-        <span
-          className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-2 text-xs font-bold ${
-            urgent
-              ? "animate-pulse bg-red-500 text-white"
-              : badgeColors[badgeColor]
-          }`}
-        >
-          {badge}
-        </span>
-      )}
-    </button>
-  );
-}
-
-// System Overview Tab
-function SystemOverviewTab({
-  tenantData,
-  globalMetrics,
-  diagnostics,
-  selectedTenantId,
-  setSelectedTenantId,
-  overview,
-  overviewLoading,
-}: any) {
-  if (!tenantData || !globalMetrics) {
-    return <LoadingState message="Loading system overview..." />;
-  }
-
-  const coverageStatus =
-    diagnostics?.analysis.coveragePercentage >= 90
-      ? "excellent"
-      : diagnostics?.analysis.coveragePercentage >= 70
-        ? "good"
-        : "needs-attention";
-
-  return (
-    <div className="space-y-8">
-      {/* System Health Alert */}
-      {(globalMetrics.testTenants > 0 ||
-        coverageStatus === "needs-attention") && (
-        <div className="rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 to-yellow-50 p-6">
-          <div className="flex items-start space-x-3">
-            <div className="text-2xl">⚠️</div>
-            <div>
-              <h3 className="font-semibold text-orange-900">
-                System Health Notice
-              </h3>
-              <div className="mt-2 space-y-1 text-sm text-orange-800">
-                {globalMetrics.testTenants > 0 && (
-                  <p>
-                    • {globalMetrics.testTenants} test tenants detected -
-                    consider cleanup for production
-                  </p>
-                )}
-                {coverageStatus === "needs-attention" && (
-                  <p>
-                    • SentinelOne coverage at{" "}
-                    {diagnostics?.analysis.coveragePercentage}% - recommend full
-                    sync
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Key Metrics Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          title="Total Endpoints"
-          value={globalMetrics.totalEndpoints.toLocaleString()}
-          change="+12% this month"
-          icon="💻"
-          color="blue"
-          trend="up"
-        />
-        <MetricCard
-          title="SentinelOne Coverage"
-          value={`${diagnostics?.analysis.coveragePercentage || 0}%`}
-          subtitle={`${diagnostics?.database.sentinelOneEndpoints || 0} of ${diagnostics?.api.totalAgentsAvailable || 0} agents`}
-          icon="🔗"
-          color={
-            coverageStatus === "excellent"
-              ? "green"
-              : coverageStatus === "good"
-                ? "orange"
-                : "red"
-          }
-        />
-        <MetricCard
-          title="Active Tenants"
-          value={globalMetrics.sentinelOneConnected}
-          subtitle={`${tenantData.summary.total} total tenants`}
-          icon="🏢"
-          color="purple"
-        />
-        <MetricCard
-          title="System Health"
-          value={
-            globalMetrics.testTenants === 0 && coverageStatus === "excellent"
-              ? "Excellent"
-              : "Attention Needed"
-          }
-          icon="🎯"
-          color={
-            globalMetrics.testTenants === 0 && coverageStatus === "excellent"
-              ? "green"
-              : "orange"
-          }
-        />
-      </div>
-
-      {/* Tenant Grid with Enhanced Cards */}
-      <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-900">
-            Tenant Overview
-          </h2>
-          <div className="text-sm text-gray-500">
-            Click any tenant to view detailed analytics
-          </div>
-        </div>
-
-        {tenantData.all?.length ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {tenantData.all.map((tenant: any) => (
-              <EnhancedTenantCard
-                key={tenant.id}
-                tenant={tenant}
-                isSelected={selectedTenantId === tenant.id}
-                onSelect={() => setSelectedTenantId(tenant.id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon="🏢"
-            title="No Tenants Found"
-            description="Connect to SentinelOne to automatically create tenants from your sites."
-          />
-        )}
-      </div>
-
-      {/* Selected Tenant Analytics */}
-      {selectedTenantId && overview && (
-        <TenantDetailedAnalytics
-          tenant={tenantData.all.find((t: any) => t.id === selectedTenantId)}
-          overview={overview}
-          loading={overviewLoading}
-        />
-      )}
-    </div>
-  );
-}
-
-// Security & Threats Tab
-function SecurityThreatsTab({ tenantData, diagnostics }: any) {
-  return (
-    <div className="space-y-8">
-      {/* Threat Summary */}
-      <div className="grid gap-6 md:grid-cols-3">
-        <ThreatCard
-          title="Critical Threats"
-          count={0} // This would come from actual data
-          icon="🚨"
-          color="red"
-          description="Active infections and critical vulnerabilities"
-        />
-        <ThreatCard
-          title="Missing Coverage"
-          count={diagnostics?.analysis.missingAgents || 0}
-          icon="🔍"
-          color="orange"
-          description="Endpoints not reporting to SentinelOne"
-        />
-        <ThreatCard
-          title="Outdated Agents"
-          count={0} // This would come from actual data
-          icon="⚠️"
-          color="yellow"
-          description="SentinelOne agents requiring updates"
-        />
-      </div>
-
-      {/* Detailed Threat Analysis */}
-      <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-        <h3 className="mb-6 text-lg font-semibold">
-          Threat Analysis by Tenant
-        </h3>
-        <div className="space-y-4">
-          {tenantData?.sentinelOne?.map((tenant: any) => (
-            <TenantThreatRow key={tenant.id} tenant={tenant} />
-          ))}
+      {/* Content */}
+      <div className="py-6">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          {activeTab === "overview" && renderOverview()}
+          {activeTab === "security" && renderSecurity()}
+          {activeTab === "vulnerabilities" && renderVulnerabilities()}
+          {activeTab === "compliance" && renderCompliance()}
+          {activeTab === "tenants" && renderTenants()}
+          {activeTab === "sentinelone" && renderSentinelOne()}
         </div>
       </div>
     </div>
   );
 }
 
-// Windows Compliance Tab
-function WindowsComplianceTab({
-  tenantData,
-  selectedTenantId,
-  setSelectedTenantId,
-}: any) {
+// RESTORED: Original helper components
+function OverviewStatsGrid({ overview, cveStats }: any) {
   return (
-    <div className="space-y-8">
-      <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-        <h3 className="mb-6 text-lg font-semibold">
-          Windows Compliance Overview
-        </h3>
-
-        {/* Windows compliance grid would go here */}
-        <div className="py-12 text-center text-gray-500">
-          <div className="mb-4 text-6xl">🪟</div>
-          <h3 className="mb-2 text-lg font-medium">
-            Windows Compliance Analysis
-          </h3>
-          <p>Detailed Windows EOL and compliance tracking coming soon</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Helper Components
-function MetricCard({
-  title,
-  value,
-  subtitle,
-  change,
-  trend,
-  icon,
-  color,
-}: any) {
-  const colorClasses = {
-    blue: "from-blue-500 to-blue-600 text-white",
-    green: "from-green-500 to-green-600 text-white",
-    purple: "from-purple-500 to-purple-600 text-white",
-    red: "from-red-500 to-red-600 text-white",
-    orange: "from-orange-500 to-orange-600 text-white",
-  };
-
-  return (
-    <div
-      className={`rounded-xl bg-gradient-to-br ${colorClasses[color]} transform p-6 shadow-lg transition-all duration-200 hover:scale-105`}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-white/80">{title}</p>
-          <p className="mt-2 text-3xl font-bold">{value}</p>
-          {subtitle && <p className="mt-1 text-sm text-white/70">{subtitle}</p>}
-          {change && (
-            <p
-              className={`mt-1 text-xs ${trend === "up" ? "text-green-200" : "text-red-200"}`}
-            >
-              {change}
-            </p>
-          )}
-        </div>
-        <div className="text-3xl opacity-80">{icon}</div>
-      </div>
-    </div>
-  );
-}
-
-function ThreatCard({ title, count, icon, color, description }: any) {
-  const colorClasses = {
-    red: "border-red-200 bg-red-50",
-    orange: "border-orange-200 bg-orange-50",
-    yellow: "border-yellow-200 bg-yellow-50",
-  };
-
-  return (
-    <div className={`rounded-xl border p-6 ${colorClasses[color]}`}>
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-2xl">{icon}</span>
-        <div className="text-right">
-          <div className="text-2xl font-bold">{count}</div>
-          <div className="text-xs text-gray-500">{title}</div>
-        </div>
-      </div>
-      <p className="text-sm text-gray-600">{description}</p>
-    </div>
-  );
-}
-
-function EnhancedTenantCard({ tenant, isSelected, onSelect }: any) {
-  const isSentinelOne = !!tenant.sentinelOneSiteId;
-  const isTest =
-    !isSentinelOne &&
-    (tenant.slug.includes("acme") ||
-      tenant.slug.includes("tech-solutions") ||
-      tenant.slug.includes("global-enterprises"));
-
-  const getStatusConfig = () => {
-    if (isSentinelOne)
-      return {
-        label: "Connected",
-        color: "green",
-        icon: "🔗",
-        bg: "bg-green-50 border-green-200",
-      };
-    if (isTest)
-      return {
-        label: "Test Data",
-        color: "orange",
-        icon: "🧪",
-        bg: "bg-orange-50 border-orange-200",
-      };
-    return {
-      label: "Manual",
-      color: "blue",
-      icon: "📋",
-      bg: "bg-blue-50 border-blue-200",
-    };
-  };
-
-  const status = getStatusConfig();
-
-  return (
-    <div
-      className={`group cursor-pointer rounded-xl border-2 p-6 transition-all duration-200 hover:shadow-lg ${
-        isSelected
-          ? "scale-105 border-blue-500 bg-blue-50 shadow-md"
-          : `${status.bg} hover:border-gray-300`
-      }`}
-      onClick={onSelect}
-    >
-      {/* Header */}
-      <div className="mb-4 flex items-start justify-between">
-        <div className="flex-1">
-          <div className="mb-1 flex items-center space-x-2">
-            <h3 className="font-semibold text-gray-900 transition-colors group-hover:text-blue-600">
-              {tenant.name}
-            </h3>
-            <span className="text-lg">{status.icon}</span>
-          </div>
-          <p className="text-sm text-gray-500">/{tenant.slug}</p>
-        </div>
-        <div
-          className={`rounded-full px-2 py-1 text-xs font-medium ${
-            status.color === "green"
-              ? "bg-green-100 text-green-700"
-              : status.color === "orange"
-                ? "bg-orange-100 text-orange-700"
-                : "bg-blue-100 text-blue-700"
-          }`}
-        >
-          {status.label}
-        </div>
-      </div>
-
-      {/* Metrics */}
-      <div className="mb-4 grid grid-cols-3 gap-3">
-        <div className="text-center">
-          <div className="text-xl font-bold text-gray-900">
-            {tenant._count?.endpoints || 0}
-          </div>
-          <div className="text-xs text-gray-500">Endpoints</div>
-        </div>
-        <div className="text-center">
-          <div className="text-xl font-bold text-gray-900">
-            {tenant._count?.users || 0}
-          </div>
-          <div className="text-xs text-gray-500">Users</div>
-        </div>
-        <div className="text-center">
-          <div className="text-xl font-bold text-gray-900">
-            {tenant._count?.clients || 0}
-          </div>
-          <div className="text-xs text-gray-500">Clients</div>
-        </div>
-      </div>
-
-      {/* Action Indicator */}
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-gray-400">Click for details</div>
-        <div
-          className={`rounded-full bg-white p-2 opacity-0 transition-all duration-200 group-hover:opacity-100 ${isSelected ? "opacity-100" : ""}`}
-        >
-          <svg
-            className="h-3 w-3 text-gray-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 5l7 7-7 7"
-            />
-          </svg>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Additional helper components...
-function LoadingState({ message }: { message: string }) {
-  return (
-    <div className="flex h-64 items-center justify-center">
-      <div className="text-center">
-        <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
-        <p className="text-gray-600">{message}</p>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ icon, title, description }: any) {
-  return (
-    <div className="rounded-xl bg-gray-50 py-12 text-center">
-      <div className="mb-4 text-6xl">{icon}</div>
-      <h3 className="mb-2 text-lg font-semibold text-gray-900">{title}</h3>
-      <p className="text-gray-600">{description}</p>
-    </div>
-  );
-}
-
-function TenantDetailedAnalytics({ tenant, overview, loading }: any) {
-  if (loading) return <LoadingState message="Loading tenant analytics..." />;
-
-  return (
-    <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-      <div className="mb-6 flex items-center justify-between">
-        <h3 className="text-xl font-semibold">
-          {tenant.name} - Detailed Analytics
-        </h3>
-        <Link
-          href={`/tenant/${tenant.slug}/dashboard`}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
-        >
-          View Dashboard →
-        </Link>
-      </div>
-
-      {/* Analytics content would go here */}
-      <div className="grid gap-6 md:grid-cols-3">
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">{overview.tenant.name} Overview</h3>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border p-4">
           <h4 className="font-medium text-gray-700">Compliance Rate</h4>
           <div className="mt-2 text-2xl font-bold text-green-600">
@@ -764,7 +578,8 @@ function TenantDetailedAnalytics({ tenant, overview, loading }: any) {
         <div className="rounded-lg border p-4">
           <h4 className="font-medium text-gray-700">Critical Issues</h4>
           <div className="mt-2 text-2xl font-bold text-red-600">
-            {overview.stats.vulnerabilities.critical}
+            {(overview.stats.vulnerabilities.critical || 0) +
+              (cveStats?.vulnerabilitiesBySeverity?.CRITICAL || 0)}
           </div>
         </div>
         <div className="rounded-lg border p-4">
@@ -773,6 +588,37 @@ function TenantDetailedAnalytics({ tenant, overview, loading }: any) {
             {overview.stats.endpoints.total}
           </div>
         </div>
+        <div className="rounded-lg border p-4">
+          <h4 className="font-medium text-gray-700">CVE Count</h4>
+          <div className="mt-2 text-2xl font-bold text-purple-600">
+            {cveStats?.totalEndpointVulnerabilities || 0}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TenantThreatsList({ tenantData }: any) {
+  if (!tenantData || tenantData.length === 0) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Tenant Threats</h3>
+        <div className="py-8 text-center text-gray-500">
+          <div className="mb-2 text-4xl">🔒</div>
+          <p>No tenants available to display threat information.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">Tenant Threats</h3>
+      <div className="space-y-4">
+        {tenantData.map((tenant: any) => (
+          <TenantThreatRow key={tenant.id} tenant={tenant} />
+        ))}
       </div>
     </div>
   );
@@ -784,7 +630,7 @@ function TenantThreatRow({ tenant }: any) {
       <div>
         <h4 className="font-medium">{tenant.name}</h4>
         <p className="text-sm text-gray-600">
-          {tenant._count.endpoints} endpoints
+          {tenant.endpoints?.length || 0} endpoints
         </p>
       </div>
       <div className="flex items-center space-x-4">
@@ -812,8 +658,50 @@ function TenantManagementTab({
   tenantsLoading,
   onDeleteClick,
 }: any) {
-  // Implementation would be similar to the existing one but with enhanced styling
-  return <div>Tenant Management Tab - Enhanced styling would go here</div>;
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border p-6">
+        <h3 className="mb-4 text-lg font-semibold">Tenant Management</h3>
+        <p className="mb-4 text-gray-600">
+          Manage tenants and their configurations.
+        </p>
+        {tenantsLoading ? (
+          <div>Loading tenants...</div>
+        ) : tenantData && tenantData.length > 0 ? (
+          <div className="space-y-2">
+            {tenantData.map((tenant: any) => (
+              <div
+                key={tenant.id}
+                className="flex items-center justify-between rounded border p-3"
+              >
+                <div>
+                  <h4 className="font-medium">{tenant.name}</h4>
+                  <p className="text-sm text-gray-600">
+                    {tenant.endpoints?.length || 0} endpoints
+                  </p>
+                </div>
+                <div className="flex space-x-2">
+                  <Link
+                    href={`/tenant/${tenant.slug}/dashboard`}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    View
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-8 text-center text-gray-500">
+            <div className="mb-2 text-4xl">🏢</div>
+            <p>
+              No tenants found. Set up SentinelOne integration to sync tenants.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function SentinelOneTab({
@@ -823,6 +711,69 @@ function SentinelOneTab({
   fullSync,
   isSyncing,
 }: any) {
-  // Implementation would be similar to the existing one but with enhanced styling
-  return <div>SentinelOne Tab - Enhanced styling would go here</div>;
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border p-6">
+        <h3 className="mb-4 text-lg font-semibold">SentinelOne Integration</h3>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div>
+            <h4 className="text-md mb-4 font-medium text-gray-900">Actions</h4>
+            <div className="space-y-3">
+              <button
+                onClick={() => testConnection()}
+                disabled={testingConnection}
+                className="inline-flex w-full items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                {testingConnection ? "Testing..." : "Test Connection"}
+              </button>
+              <button
+                onClick={() => fullSync()}
+                disabled={isSyncing}
+                className="inline-flex w-full items-center justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isSyncing ? "Syncing..." : "Full Agent Sync"}
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    console.log("Testing CVE stats...");
+                    const stats =
+                      await api.cveManagement.getSyncStatistics.query();
+                    console.log("CVE Stats:", stats);
+                  } catch (error) {
+                    console.error("CVE Router Error:", error);
+                  }
+                }}
+                className="rounded bg-purple-600 px-4 py-2 text-white"
+              >
+                Test CVE Router
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-md mb-4 font-medium text-gray-900">Status</h4>
+            <div className="space-y-2 text-sm">
+              {diagnostics && (
+                <>
+                  <div className="flex justify-between">
+                    <span>SentinelOne Sites:</span>
+                    <span>{diagnostics.sentinelOneSites || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Agents:</span>
+                    <span>{diagnostics.totalAgents || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Synced Agents:</span>
+                    <span>{diagnostics.syncedAgents || 0}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
