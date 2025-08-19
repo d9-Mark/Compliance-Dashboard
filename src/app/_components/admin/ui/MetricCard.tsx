@@ -1,4 +1,5 @@
-// components/admin/ui/MetricCard.tsx
+// Replace src/app/_components/admin/ui/MetricCard.tsx with this safer version:
+
 interface MetricCardProps {
   title: string;
   value: string | number;
@@ -18,6 +19,7 @@ export function MetricCard({
   trend,
   urgent,
 }: MetricCardProps) {
+  // SAFER: Use object lookup instead of complex template literals
   const colorClasses = {
     blue: "from-blue-500 to-blue-600",
     green: "from-green-500 to-green-600",
@@ -33,18 +35,25 @@ export function MetricCard({
     critical: "🚨 Critical",
   };
 
+  // SAFER: Build className without complex conditionals
+  const baseClasses =
+    "rounded-xl bg-gradient-to-br transform p-6 text-white shadow-lg transition-all duration-200 hover:scale-105";
+  const colorClass = colorClasses[color] || colorClasses.blue;
+  const urgentClass = urgent ? "animate-pulse" : "";
+
+  // Combine classes safely
+  const classNames = [baseClasses, colorClass, urgentClass]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div
-      className={`rounded-xl bg-gradient-to-br ${colorClasses[color]} transform p-6 text-white shadow-lg transition-all duration-200 hover:scale-105 ${
-        urgent ? "animate-pulse" : ""
-      }`}
-    >
+    <div className={classNames}>
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-white/80">{title}</p>
           <p className="mt-2 text-3xl font-bold">{value}</p>
           {subtitle && <p className="mt-1 text-sm text-white/70">{subtitle}</p>}
-          {trend && (
+          {trend && trendLabels[trend] && (
             <p className="mt-1 text-xs text-white/60">{trendLabels[trend]}</p>
           )}
         </div>

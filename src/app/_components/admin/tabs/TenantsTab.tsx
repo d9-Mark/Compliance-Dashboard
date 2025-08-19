@@ -22,9 +22,9 @@ export function TenantsTab({
     { key: "name", label: "Name" },
     { key: "slug", label: "Slug" },
     {
-      key: "endpoints",
+      key: "_count",
       label: "Endpoints",
-      render: (endpoints: any[]) => endpoints?.length || 0,
+      render: (count: any) => count?.endpoints || 0,
     },
     {
       key: "complianceRate",

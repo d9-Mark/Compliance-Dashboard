@@ -1,4 +1,4 @@
-// components/admin/ui/DataTable.tsx
+// Create src/app/_components/admin/ui/DataTable.tsx
 interface DataTableProps {
   columns: Array<{
     key: string;
@@ -20,7 +20,12 @@ export function DataTable({
     return (
       <div className="rounded-lg border">
         <div className="p-8">
-          <LoadingSpinner message="Loading data..." />
+          <div className="flex items-center justify-center">
+            <div className="text-center">
+              <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
+              <p className="text-gray-600">Loading data...</p>
+            </div>
+          </div>
         </div>
       </div>
     );

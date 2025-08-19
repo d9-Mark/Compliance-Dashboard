@@ -198,6 +198,22 @@ export const tenantRouter = createTRPCRouter({
   getTenantsByType: adminProcedure.query(async ({ ctx }) => {
     const allTenants = await ctx.db.tenant.findMany({
       include: {
+        endpoints: {
+          select: {
+            id: true,
+            hostname: true,
+            windowsCompliant: true,
+            windowsComplianceScore: true,
+            activeThreats: true,
+            criticalVulns: true,
+            highVulns: true,
+            mediumVulns: true,
+            lowVulns: true,
+            lastWindowsCheck: true,
+            isCompliant: true,
+            complianceScore: true,
+          },
+        },
         _count: {
           select: {
             users: true,
@@ -809,5 +825,512 @@ export const tenantRouter = createTRPCRouter({
         syncJobs: latestBySource,
         recentJobs: syncJobs.slice(0, 5),
       };
+    }),
+
+  /**
+   * Get global compliance statistics - ADMIN ONLY
+   * This provides the data needed for the admin dashboard overview
+   */
+  getGlobalStats: adminProcedure.query(async ({ ctx }) => {
+    // Get all endpoint compliance stats grouped by tenant
+    const endpointStats = await ctx.db.endpoint.groupBy({
+      by: ["tenantId", "isCompliant"],
+      _count: { id: true },
+    });
+
+    // Get all tenants for reference
+    const tenants = await ctx.db.tenant.findMany({
+      select: { id: true, name: true, slug: true },
+    });
+
+    // Process stats by tenant
+    const tenantStats = new Map();
+
+    // Initialize all tenants with zero stats
+    tenants.forEach((tenant) => {
+      tenantStats.set(tenant.id, {
+        ...tenant,
+        totalEndpoints: 0,
+        compliantEndpoints: 0,
+        nonCompliantEndpoints: 0,
+        complianceRate: 0,
+      });
+    });
+
+    // Add actual endpoint counts
+    endpointStats.forEach((stat) => {
+      const tenant = tenantStats.get(stat.tenantId);
+      if (tenant) {
+        tenant.totalEndpoints += stat._count.id;
+        if (stat.isCompliant) {
+          tenant.compliantEndpoints += stat._count.id;
+        } else {
+          tenant.nonCompliantEndpoints += stat._count.id;
+        }
+      }
+    });
+
+    // Calculate compliance rates
+    const tenantList = Array.from(tenantStats.values()).map((tenant) => ({
+      ...tenant,
+      complianceRate:
+        tenant.totalEndpoints > 0
+          ? Math.round(
+              (tenant.compliantEndpoints / tenant.totalEndpoints) * 100,
+            )
+          : 0,
+    }));
+
+    // Calculate global totals
+    const globalTotals = tenantList.reduce(
+      (acc, tenant) => ({
+        totalTenants: acc.totalTenants + 1,
+        totalEndpoints: acc.totalEndpoints + tenant.totalEndpoints,
+        totalCompliant: acc.totalCompliant + tenant.compliantEndpoints,
+        totalNonCompliant: acc.totalNonCompliant + tenant.nonCompliantEndpoints,
+      }),
+      {
+        totalTenants: 0,
+        totalEndpoints: 0,
+        totalCompliant: 0,
+        totalNonCompliant: 0,
+      },
+    );
+
+    const globalComplianceRate =
+      globalTotals.totalEndpoints > 0
+        ? Math.round(
+            (globalTotals.totalCompliant / globalTotals.totalEndpoints) * 100,
+          )
+        : 0;
+
+    return {
+      global: {
+        ...globalTotals,
+        averageCompliance: globalComplianceRate,
+      },
+      tenants: tenantList,
+    };
+  }),
+
+  /**
+   * Get vulnerability trends for a tenant - NEW ENDPOINT
+   */
+  getVulnerabilityTrends: tenantProcedure
+    .input(
+      z.object({
+        tenantId: z.string().optional(),
+        days: z.number().min(7).max(90).default(30),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const filter = getTenantFilter({
+        isAdmin: ctx.isAdmin,
+        tenantId: ctx.tenantId,
+        inputTenantId: input.tenantId,
+      });
+
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - input.days);
+
+      try {
+        // Get vulnerability detection trends
+        const vulnerabilityDetections =
+          await ctx.db.endpointVulnerability.groupBy({
+            by: ["detectedAt"],
+            where: {
+              endpoint: filter,
+              detectedAt: { gte: startDate },
+              status: "OPEN",
+            },
+            _count: {
+              id: true,
+            },
+            orderBy: {
+              detectedAt: "asc",
+            },
+          });
+
+        // Get resolution trends
+        const vulnerabilityResolutions =
+          await ctx.db.endpointVulnerability.groupBy({
+            by: ["resolvedAt"],
+            where: {
+              endpoint: filter,
+              resolvedAt: { gte: startDate },
+              status: "RESOLVED",
+            },
+            _count: {
+              id: true,
+            },
+            orderBy: {
+              resolvedAt: "asc",
+            },
+          });
+
+        // Process data into daily buckets
+        const dailyData = [];
+        for (let i = 0; i < input.days; i++) {
+          const date = new Date(startDate);
+          date.setDate(date.getDate() + i);
+          const dateStr = date.toISOString().split("T")[0];
+
+          const detected = vulnerabilityDetections
+            .filter((v) => v.detectedAt.toISOString().split("T")[0] === dateStr)
+            .reduce((sum, v) => sum + v._count.id, 0);
+
+          const resolved = vulnerabilityResolutions
+            .filter(
+              (v) =>
+                v.resolvedAt &&
+                v.resolvedAt.toISOString().split("T")[0] === dateStr,
+            )
+            .reduce((sum, v) => sum + v._count.id, 0);
+
+          dailyData.push({
+            date: dateStr,
+            detected,
+            resolved,
+            net: detected - resolved,
+          });
+        }
+
+        return {
+          trends: dailyData,
+          summary: {
+            totalDetected: dailyData.reduce((sum, d) => sum + d.detected, 0),
+            totalResolved: dailyData.reduce((sum, d) => sum + d.resolved, 0),
+            netChange: dailyData.reduce((sum, d) => sum + d.net, 0),
+          },
+        };
+      } catch (error) {
+        console.error("Error fetching vulnerability trends:", error);
+        return {
+          trends: [],
+          summary: {
+            totalDetected: 0,
+            totalResolved: 0,
+            netChange: 0,
+          },
+        };
+      }
+    }),
+
+  /**
+   * Get detailed critical vulnerabilities by endpoint - NEW ENHANCED ENDPOINT
+   */
+  getCriticalVulnerabilityDetails: tenantProcedure
+    .input(
+      z.object({
+        tenantId: z.string().optional(),
+        severityFilter: z
+          .enum(["CRITICAL", "HIGH", "CRITICAL_AND_HIGH"])
+          .default("CRITICAL_AND_HIGH"),
+        hideD9Managed: z.boolean().default(false), // Admin can filter out D9-managed apps
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const filter = getTenantFilter({
+        isAdmin: ctx.isAdmin,
+        tenantId: ctx.tenantId,
+        inputTenantId: input.tenantId,
+      });
+
+      // Build severity filter
+      const severityCondition =
+        input.severityFilter === "CRITICAL_AND_HIGH"
+          ? ["CRITICAL", "HIGH"]
+          : [input.severityFilter];
+
+      // Get D9 managed apps list for admin filtering
+      const d9ManagedApps =
+        input.hideD9Managed && ctx.isAdmin
+          ? [
+              "Microsoft Edge",
+              "Google Chrome",
+              "Mozilla Firefox",
+              "Adobe Acrobat",
+              "Microsoft Office",
+              "Zoom",
+              "Teams",
+              "OneDrive",
+              // Add more D9-managed apps as needed
+            ]
+          : [];
+
+      const endpoints = await ctx.db.endpoint.findMany({
+        where: {
+          ...filter,
+          // Only endpoints with critical/high vulnerabilities
+          vulnerabilities: {
+            some: {
+              status: "OPEN",
+              vulnerability: {
+                severity: { in: severityCondition },
+                ...(d9ManagedApps.length > 0 && {
+                  product: { notIn: d9ManagedApps },
+                }),
+              },
+            },
+          },
+        },
+        include: {
+          client: {
+            select: { id: true, name: true },
+          },
+          vulnerabilities: {
+            where: {
+              status: "OPEN",
+              vulnerability: {
+                severity: { in: severityCondition },
+                ...(d9ManagedApps.length > 0 && {
+                  product: { notIn: d9ManagedApps },
+                }),
+              },
+            },
+            include: {
+              vulnerability: {
+                select: {
+                  id: true,
+                  cveId: true,
+                  title: true,
+                  description: true,
+                  severity: true,
+                  cvssScore: true,
+                  vendor: true,
+                  product: true,
+                  version: true,
+                },
+              },
+            },
+            orderBy: [
+              { vulnerability: { severity: "desc" } },
+              { detectedAt: "desc" },
+            ],
+          },
+        },
+        orderBy: [
+          { criticalVulns: "desc" },
+          { highVulns: "desc" },
+          { hostname: "asc" },
+        ],
+      });
+
+      // Transform data for easier consumption
+      const endpointDetails = endpoints.map((endpoint) => {
+        const vulnsByApp = endpoint.vulnerabilities.reduce(
+          (acc, ev) => {
+            const app = `${ev.vulnerability.vendor || "Unknown"} ${ev.vulnerability.product || "Unknown"}`;
+            const version = ev.vulnerability.version || "Unknown Version";
+
+            if (!acc[app]) {
+              acc[app] = {
+                appName: app,
+                vendor: ev.vulnerability.vendor,
+                product: ev.vulnerability.product,
+                vulnerabilities: [],
+                criticalCount: 0,
+                highCount: 0,
+                totalCount: 0,
+              };
+            }
+
+            acc[app].vulnerabilities.push({
+              id: ev.vulnerability.id,
+              cveId: ev.vulnerability.cveId,
+              title: ev.vulnerability.title,
+              severity: ev.vulnerability.severity,
+              cvssScore: ev.vulnerability.cvssScore,
+              version: ev.vulnerability.version,
+              detectedAt: ev.detectedAt,
+            });
+
+            if (ev.vulnerability.severity === "CRITICAL")
+              acc[app].criticalCount++;
+            if (ev.vulnerability.severity === "HIGH") acc[app].highCount++;
+            acc[app].totalCount++;
+
+            return acc;
+          },
+          {} as Record<string, any>,
+        );
+
+        return {
+          endpoint: {
+            id: endpoint.id,
+            hostname: endpoint.hostname,
+            operatingSystem: endpoint.operatingSystem,
+            client: endpoint.client,
+            criticalVulns: endpoint.criticalVulns,
+            highVulns: endpoint.highVulns,
+            lastSeen: endpoint.lastSeen,
+          },
+          vulnerableApps: Object.values(vulnsByApp),
+          totalCritical: endpoint.vulnerabilities.filter(
+            (v) => v.vulnerability.severity === "CRITICAL",
+          ).length,
+          totalHigh: endpoint.vulnerabilities.filter(
+            (v) => v.vulnerability.severity === "HIGH",
+          ).length,
+          totalVulnerabilities: endpoint.vulnerabilities.length,
+        };
+      });
+
+      // Summary statistics
+      const summary = {
+        totalEndpointsAffected: endpoints.length,
+        totalCriticalVulns: endpointDetails.reduce(
+          (sum, e) => sum + e.totalCritical,
+          0,
+        ),
+        totalHighVulns: endpointDetails.reduce(
+          (sum, e) => sum + e.totalHigh,
+          0,
+        ),
+        mostVulnerableApps: Object.values(
+          endpointDetails
+            .flatMap((e) => e.vulnerableApps)
+            .reduce(
+              (acc, app) => {
+                const key = app.appName;
+                if (!acc[key]) {
+                  acc[key] = {
+                    appName: app.appName,
+                    vendor: app.vendor,
+                    product: app.product,
+                    affectedEndpoints: new Set(),
+                    criticalCount: 0,
+                    highCount: 0,
+                    totalCount: 0,
+                  };
+                }
+                acc[key].affectedEndpoints.add(
+                  endpointDetails.find((e) =>
+                    e.vulnerableApps.some((va) => va.appName === app.appName),
+                  )?.endpoint.id,
+                );
+                acc[key].criticalCount += app.criticalCount;
+                acc[key].highCount += app.highCount;
+                acc[key].totalCount += app.totalCount;
+                return acc;
+              },
+              {} as Record<string, any>,
+            ),
+        )
+          .map((app) => ({
+            ...app,
+            affectedEndpointsCount: app.affectedEndpoints.size,
+            affectedEndpoints: undefined, // Remove the Set for JSON serialization
+          }))
+          .sort(
+            (a, b) =>
+              b.criticalCount - a.criticalCount || b.totalCount - a.totalCount,
+          )
+          .slice(0, 10),
+      };
+
+      return {
+        endpoints: endpointDetails,
+        summary,
+        isFiltered: input.hideD9Managed && ctx.isAdmin,
+        d9ManagedAppsHidden: d9ManagedApps.length,
+      };
+    }),
+
+  /**
+   * Get D9 managed apps - QUERY
+   */
+  getD9ManagedApps: adminProcedure.query(async ({ ctx }) => {
+    const d9Apps = await ctx.db.application.findMany({
+      where: {
+        category: "D9_MANAGED",
+      },
+      select: {
+        name: true,
+        vendor: true,
+        category: true,
+      },
+    });
+
+    return { apps: d9Apps };
+  }),
+
+  /**
+   * Admin-only: Manage D9 app exclusions - NEW ADMIN ENDPOINT
+   */
+  manageD9Apps: adminProcedure
+    .input(
+      z.object({
+        action: z.enum(["GET", "ADD", "REMOVE"]),
+        appName: z.string().optional(),
+        vendor: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // This could be stored in a dedicated table, but for now using Application model
+      // with a special flag or storing in a config table
+
+      if (input.action === "GET") {
+        // Return current D9 managed apps
+        const d9Apps = await ctx.db.application.findMany({
+          where: {
+            category: "D9_MANAGED", // Use category field to mark D9 managed apps
+          },
+          select: {
+            name: true,
+            vendor: true,
+            category: true,
+          },
+        });
+
+        return { apps: d9Apps };
+      }
+
+      if (input.action === "ADD" && input.appName) {
+        await ctx.db.application.upsert({
+          where: {
+            name_vendor: {
+              name: input.appName,
+              vendor: input.vendor || "Unknown",
+            },
+          },
+          update: {
+            category: "D9_MANAGED",
+          },
+          create: {
+            name: input.appName,
+            vendor: input.vendor || "Unknown",
+            category: "D9_MANAGED",
+            riskLevel: "LOW", // D9 managed apps are low risk
+            isMonitored: false, // Don't alert on D9 managed apps
+          },
+        });
+
+        return {
+          success: true,
+          message: `Added ${input.appName} to D9 managed apps`,
+        };
+      }
+
+      if (input.action === "REMOVE" && input.appName) {
+        await ctx.db.application.updateMany({
+          where: {
+            name: input.appName,
+            vendor: input.vendor,
+            category: "D9_MANAGED",
+          },
+          data: {
+            category: "OTHER",
+            isMonitored: true,
+          },
+        });
+
+        return {
+          success: true,
+          message: `Removed ${input.appName} from D9 managed apps`,
+        };
+      }
+
+      throw new Error("Invalid action or missing parameters");
     }),
 });

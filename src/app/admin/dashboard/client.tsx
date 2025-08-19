@@ -1,7 +1,7 @@
 // src/app/admin/dashboard/client.tsx
 "use client";
-import type { Session } from "next-auth";
 import { AdminDashboard } from "~/app/_components/admin/AdminDashboard";
+import type { Session } from "next-auth";
 
 interface AdminDashboardClientProps {
   session: Session;

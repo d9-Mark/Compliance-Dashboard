@@ -1,4 +1,4 @@
-// components/admin/tabs/OverviewTab.tsx
+// Replace src/app/_components/admin/tabs/OverviewTab.tsx
 import { MetricCard } from "../ui/MetricCard";
 import { StatGrid } from "../ui/StatGrid";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
@@ -10,6 +10,7 @@ interface OverviewTabProps {
   selectedTenantId: string | null;
   overview: any;
   cveAvailable: boolean;
+  tenantData: any;
   onTenantSelect: (tenantId: string) => void;
 }
 
@@ -19,6 +20,7 @@ export function OverviewTab({
   selectedTenantId,
   overview,
   cveAvailable,
+  tenantData,
   onTenantSelect,
 }: OverviewTabProps) {
   if (!globalMetrics) {
@@ -28,6 +30,42 @@ export function OverviewTab({
   const complianceRate = Math.round(globalMetrics.averageCompliance);
   const criticalIssues =
     globalMetrics.criticalVulns + globalMetrics.totalThreats;
+
+  // Prepare tenant selection data
+  const tenantSelectData =
+    tenantData?.all?.map((tenant: any) => ({
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      endpoints: tenant._count?.endpoints || 0,
+    })) || [];
+
+  const tenantColumns = [
+    { key: "name", label: "Tenant Name" },
+    { key: "endpoints", label: "Endpoints" },
+    {
+      key: "actions",
+      label: "Actions",
+      render: (_, tenant: any) => (
+        <div className="flex space-x-2">
+          <button
+            onClick={() => onTenantSelect(tenant.id)}
+            className="rounded bg-blue-100 px-3 py-1 text-sm text-blue-700 hover:bg-blue-200"
+          >
+            Quick View
+          </button>
+          <button
+            onClick={() =>
+              window.open(`/tenant/${tenant.slug}/dashboard`, "_blank")
+            }
+            className="rounded bg-gray-100 px-3 py-1 text-sm text-gray-700 hover:bg-gray-200"
+          >
+            Full Dashboard
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -103,7 +141,7 @@ export function OverviewTab({
         </StatGrid>
       </div>
 
-      {/* Threat & Vulnerability Overview */}
+      {/* Security Overview */}
       <div>
         <h2 className="mb-4 text-lg font-semibold text-gray-900">
           Security Overview
@@ -131,17 +169,17 @@ export function OverviewTab({
           />
           <MetricCard
             title="Endpoints at Risk"
-            value={
+            value={Math.round(
               globalMetrics.totalEndpoints -
-              (globalMetrics.totalEndpoints * complianceRate) / 100
-            }
+                (globalMetrics.totalEndpoints * complianceRate) / 100,
+            )}
             icon="💻"
             color="orange"
           />
         </StatGrid>
       </div>
 
-      {/* CVE Statistics */}
+      {/* CVE Statistics - FIXED */}
       {cveStats && (
         <div>
           <h2 className="mb-4 text-lg font-semibold text-gray-900">
@@ -150,7 +188,7 @@ export function OverviewTab({
           <StatGrid columns={4}>
             <MetricCard
               title="Total CVEs"
-              value={cveStats.totalEndpoints || 0}
+              value={cveStats.totalVulnerabilities || 0}
               icon="🛡️"
               color="blue"
             />
@@ -176,11 +214,28 @@ export function OverviewTab({
         </div>
       )}
 
+      {/* Tenant Selection Table */}
+      <div>
+        <h2 className="mb-4 text-lg font-semibold text-gray-900">
+          Tenant Quick Access
+        </h2>
+        <div className="rounded-lg bg-white p-4">
+          <p className="mb-4 text-sm text-gray-600">
+            Select a tenant for quick overview or open their full dashboard
+          </p>
+          <DataTable
+            columns={tenantColumns}
+            data={tenantSelectData}
+            emptyMessage="No tenants available"
+          />
+        </div>
+      </div>
+
       {/* Selected Tenant Overview */}
       {selectedTenantId && overview && (
         <div>
           <h2 className="mb-4 text-lg font-semibold text-gray-900">
-            {overview.tenant.name} Details
+            {overview.tenant.name} - Quick View
           </h2>
           <StatGrid columns={3}>
             <MetricCard
@@ -207,10 +262,18 @@ export function OverviewTab({
               color="red"
             />
           </StatGrid>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => onTenantSelect("")}
+              className="rounded bg-gray-200 px-4 py-2 text-gray-800 hover:bg-gray-300"
+            >
+              Clear Selection
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Debug Info */}
+      {/* System Status */}
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
         <div className="text-sm">
           <div className="font-semibold text-gray-700">🔍 System Status:</div>

@@ -1,9 +1,4 @@
-// components/admin/tabs/VulnerabilitiesTab.tsx
-import { MetricCard } from "../ui/MetricCard";
-import { StatGrid } from "../ui/StatGrid";
-import { ActionButton } from "../ui/ActionButton";
-import { DataTable } from "../ui/DataTable";
-
+// Create src/app/_components/admin/tabs/VulnerabilitiesTab.tsx
 interface VulnerabilitiesTabProps {
   cveStats: any;
   cveSyncHistory: any;
@@ -30,8 +25,7 @@ export function VulnerabilitiesTab({
               CVE Integration Not Available
             </h3>
             <p className="mt-2 text-orange-700">
-              CVE management features are not currently enabled. Please check
-              your configuration.
+              CVE management features are not currently enabled.
             </p>
           </div>
         </div>
@@ -39,89 +33,103 @@ export function VulnerabilitiesTab({
     );
   }
 
-  const historyColumns = [
-    {
-      key: "startedAt",
-      label: "Date",
-      render: (date: string) => new Date(date).toLocaleString(),
-    },
-    { key: "status", label: "Status" },
-    { key: "recordsProcessed", label: "Records" },
-    {
-      key: "duration",
-      label: "Duration",
-      render: (ms: number) => `${Math.round(ms / 1000)}s`,
-    },
-  ];
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">CVE Management</h2>
-        <ActionButton onClick={syncCVEs} loading={isSyncing} variant="primary">
+        <button
+          onClick={syncCVEs}
+          disabled={isSyncing}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+        >
           {isSyncing ? "Syncing..." : "Sync CVEs"}
-        </ActionButton>
+        </button>
       </div>
 
       {/* CVE Statistics */}
       {cveStats && (
-        <StatGrid columns={4}>
-          <MetricCard
-            title="Total CVEs"
-            value={cveStats.totalVulnerabilities || 0}
-            icon="🛡️"
-            color="blue"
-          />
-          <MetricCard
-            title="Critical"
-            value={cveStats.vulnerabilitiesBySeverity?.CRITICAL || 0}
-            icon="🔥"
-            color="red"
-          />
-          <MetricCard
-            title="High"
-            value={cveStats.vulnerabilitiesBySeverity?.HIGH || 0}
-            icon="⚠️"
-            color="orange"
-          />
-          <MetricCard
-            title="Affected Endpoints"
-            value={cveStats.totalEndpoints || 0}
-            icon="💻"
-            color="purple"
-          />
-        </StatGrid>
+        <div>
+          <h3 className="mb-4 text-lg font-semibold">CVE Statistics</h3>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border bg-blue-500 p-6 text-white">
+              <p className="text-sm font-medium text-white/80">Total CVEs</p>
+              <p className="mt-2 text-3xl font-bold">
+                {cveStats.totalVulnerabilities || 0}
+              </p>
+              <div className="text-2xl opacity-70">🛡️</div>
+            </div>
+
+            <div className="rounded-lg border bg-red-500 p-6 text-white">
+              <p className="text-sm font-medium text-white/80">Critical</p>
+              <p className="mt-2 text-3xl font-bold">
+                {cveStats.vulnerabilitiesBySeverity?.CRITICAL || 0}
+              </p>
+              <div className="text-2xl opacity-70">🔥</div>
+            </div>
+
+            <div className="rounded-lg border bg-orange-500 p-6 text-white">
+              <p className="text-sm font-medium text-white/80">High</p>
+              <p className="mt-2 text-3xl font-bold">
+                {cveStats.vulnerabilitiesBySeverity?.HIGH || 0}
+              </p>
+              <div className="text-2xl opacity-70">⚠️</div>
+            </div>
+
+            <div className="rounded-lg border bg-purple-500 p-6 text-white">
+              <p className="text-sm font-medium text-white/80">Active Issues</p>
+              <p className="mt-2 text-3xl font-bold">
+                {cveStats.totalEndpointVulnerabilities || 0}
+              </p>
+              <div className="text-2xl opacity-70">💻</div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Sync History */}
-      {cveSyncHistory && (
+      {cveSyncHistory && cveSyncHistory.length > 0 && (
         <div>
           <h3 className="mb-4 text-lg font-semibold">Recent Sync History</h3>
-          <DataTable
-            columns={historyColumns}
-            data={cveSyncHistory}
-            emptyMessage="No sync history available"
-          />
-        </div>
-      )}
-
-      {/* CVE Actions */}
-      <div className="rounded-lg border bg-white p-6">
-        <h3 className="mb-4 text-lg font-semibold">CVE Management Actions</h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-lg border p-4">
-            <div>
-              <h4 className="font-medium">Sync All CVEs</h4>
-              <p className="text-sm text-gray-600">
-                Import latest CVE data from external sources
-              </p>
-            </div>
-            <ActionButton onClick={syncCVEs} loading={isSyncing}>
-              Sync Now
-            </ActionButton>
+          <div className="overflow-hidden rounded-lg border bg-white shadow">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase">
+                    Date
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase">
+                    Records
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase">
+                    Duration
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {cveSyncHistory.map((item: any, index: number) => (
+                  <tr key={index} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm whitespace-nowrap text-gray-900">
+                      {new Date(item.startedAt).toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm whitespace-nowrap text-gray-900">
+                      {item.status}
+                    </td>
+                    <td className="px-6 py-4 text-sm whitespace-nowrap text-gray-900">
+                      {item.recordsProcessed}
+                    </td>
+                    <td className="px-6 py-4 text-sm whitespace-nowrap text-gray-900">
+                      {Math.round(item.duration / 1000)}s
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

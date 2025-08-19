@@ -1,22 +1,22 @@
+// RESTORED WORKING DASHBOARD - src/app/tenant/[slug]/dashboard/enhanced-client.tsx
 "use client";
-// src/app/tenant/[slug]/dashboard/client.tsx - Professional Tenant Dashboard
 
 import { api } from "~/trpc/react";
 import type { Session } from "next-auth";
 import Link from "next/link";
 import { useState } from "react";
 
-interface TenantDashboardClientProps {
+interface EnhancedTenantDashboardProps {
   session: Session;
   tenantSlug: string;
 }
 
-export function TenantDashboardClient({
+export function EnhancedTenantDashboard({
   session,
   tenantSlug,
-}: TenantDashboardClientProps) {
+}: EnhancedTenantDashboardProps) {
   const [activeTab, setActiveTab] = useState<
-    "overview" | "security" | "compliance" | "endpoints"
+    "overview" | "security" | "compliance" | "endpoints" | "vulnerabilities"
   >("overview");
   const [complianceFilter, setComplianceFilter] = useState<
     "all" | "compliant" | "non-compliant"
@@ -25,7 +25,7 @@ export function TenantDashboardClient({
     "all" | "latest" | "outdated" | "unknown"
   >("all");
 
-  // Get tenant data
+  // Get tenant data (ORIGINAL WORKING QUERY)
   const { data: tenantData } = api.tenant.getAll.useQuery(undefined, {
     enabled: session.user.role === "ADMIN",
     select: (tenants) => tenants.find((t) => t.slug === tenantSlug),
@@ -35,7 +35,7 @@ export function TenantDashboardClient({
   const queryTenantId =
     session.user.role === "ADMIN" ? tenantData?.id : undefined;
 
-  // Data queries
+  // ORIGINAL WORKING DATA QUERIES - RESTORED
   const { data: overview, isLoading } = api.tenant.getOverview.useQuery(
     session.user.role === "ADMIN" ? { tenantId: queryTenantId } : {},
     { enabled: session.user.role !== "ADMIN" || !!queryTenantId },
@@ -56,6 +56,32 @@ export function TenantDashboardClient({
     { enabled: session.user.role !== "ADMIN" || !!queryTenantId },
   );
 
+  // ENHANCED QUERIES - NOW ENABLED!
+  const { data: criticalVulnDetails, isLoading: vulnLoading } =
+    api.tenant.getCriticalVulnerabilityDetails.useQuery(
+      {
+        ...(session.user.role === "ADMIN" ? { tenantId: queryTenantId } : {}),
+        severityFilter: "CRITICAL_AND_HIGH",
+        hideD9Managed: false, // Start with false, can be toggled by admin
+      },
+      { enabled: session.user.role !== "ADMIN" || !!queryTenantId },
+    );
+
+  // Vulnerability trends
+  const { data: vulnerabilityTrends } =
+    api.tenant.getVulnerabilityTrends.useQuery(
+      {
+        ...(session.user.role === "ADMIN" ? { tenantId: queryTenantId } : {}),
+        days: 30,
+      },
+      { enabled: session.user.role !== "ADMIN" || !!queryTenantId },
+    );
+
+  // D9 managed apps (admin only)
+  const { data: d9Apps } = api.tenant.getD9ManagedApps.useQuery(undefined, {
+    enabled: session.user.role === "ADMIN",
+  });
+
   if (isLoading || (session.user.role === "ADMIN" && !tenantData)) {
     return <LoadingDashboard />;
   }
@@ -69,7 +95,7 @@ export function TenantDashboardClient({
     );
   }
 
-  // Calculate key metrics
+  // Calculate key metrics (ORIGINAL WORKING CALCULATIONS)
   const totalEndpoints = overview.stats.endpoints.total;
   const complianceRate =
     totalEndpoints > 0
@@ -84,172 +110,97 @@ export function TenantDashboardClient({
           (overview.stats.windows.compliant / overview.stats.windows.total) *
             100,
         )
-      : 100;
+      : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <div className="border-b bg-white/90 shadow-sm backdrop-blur-md">
-        <div className="container mx-auto px-6 py-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      {/* Professional Header */}
+      <div className="bg-white/80 shadow-sm backdrop-blur-sm">
+        <div className="mx-auto max-w-7xl px-4 py-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600">
-                  <span className="text-lg font-bold text-white">
-                    {(tenantData?.name || overview.tenant.name).charAt(0)}
-                  </span>
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">
-                    {tenantData?.name || overview.tenant.name}
-                  </h1>
-                  <p className="text-sm text-gray-600">
-                    Compliance Dashboard • {session.user.name}
-                    {session.user.role === "ADMIN" && (
-                      <span className="ml-2 rounded-full bg-purple-100 px-2 py-1 text-xs text-purple-800">
-                        ADMIN VIEW
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              {/* Live Status Indicators */}
-              <div className="ml-8 hidden items-center space-x-4 lg:flex">
-                <StatusBadge
-                  label="Compliance"
-                  value={`${complianceRate}%`}
-                  status={
-                    complianceRate >= 90
-                      ? "excellent"
-                      : complianceRate >= 70
-                        ? "good"
-                        : "attention"
-                  }
-                />
-                <StatusBadge
-                  label="Windows"
-                  value={`${windowsComplianceRate}%`}
-                  status={
-                    windowsComplianceRate >= 90
-                      ? "excellent"
-                      : windowsComplianceRate >= 70
-                        ? "good"
-                        : "attention"
-                  }
-                />
-                {criticalIssues > 0 && (
-                  <StatusBadge
-                    label="Critical"
-                    value={criticalIssues}
-                    status="critical"
-                    urgent
-                  />
-                )}
-              </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {tenantData?.name || overview.tenant.name}
+              </h1>
+              <p className="text-gray-600">Security & Compliance Dashboard</p>
             </div>
-
-            <div className="flex items-center space-x-3">
-              {session.user.role === "ADMIN" && (
-                <Link
-                  href="/admin/dashboard"
-                  className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200"
-                >
-                  ← Admin Dashboard
-                </Link>
-              )}
-              <Link
-                href="/auth/signout"
-                className="rounded-lg bg-red-100 px-4 py-2 text-red-700 transition-colors hover:bg-red-200"
-              >
-                Sign Out
-              </Link>
+            <div className="text-right">
+              <div className="text-sm text-gray-500">Last Updated</div>
+              <div className="font-medium">
+                {new Date().toLocaleDateString()}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div className="border-b bg-white/70 backdrop-blur-sm">
-        <div className="container mx-auto px-6">
-          <nav className="flex space-x-8">
-            <TabButton
-              active={activeTab === "overview"}
-              onClick={() => setActiveTab("overview")}
-              icon="📊"
-              label="Overview"
-              badge={criticalIssues > 0 ? criticalIssues : undefined}
-              urgent={criticalIssues > 0}
-            />
-            <TabButton
-              active={activeTab === "security"}
-              onClick={() => setActiveTab("security")}
-              icon="🛡️"
-              label="Security & Threats"
-              badge={
-                overview.stats.vulnerabilities.critical +
-                overview.stats.vulnerabilities.high
-              }
-              urgent={overview.stats.vulnerabilities.critical > 0}
-            />
-            <TabButton
-              active={activeTab === "compliance"}
-              onClick={() => setActiveTab("compliance")}
-              icon="🪟"
-              label="Windows Compliance"
-              badge={
-                overview.stats.windows.outdated + overview.stats.windows.unknown
-              }
-              urgent={overview.stats.windows.outdated > 0}
-            />
-            <TabButton
-              active={activeTab === "endpoints"}
-              onClick={() => setActiveTab("endpoints")}
-              icon="💻"
-              label="All Endpoints"
-              badge={totalEndpoints}
-            />
-          </nav>
+      <div className="mx-auto max-w-7xl px-4 py-4">
+        <div className="flex space-x-1 rounded-lg bg-white/60 p-1 backdrop-blur-sm">
+          {(
+            [
+              "overview",
+              "security",
+              "compliance",
+              "endpoints",
+              "vulnerabilities",
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === tab
+                  ? "bg-white text-blue-600 shadow-sm"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Content */}
-      <div className="container mx-auto px-6 py-8">
+      {/* Content Area */}
+      <div className="mx-auto max-w-7xl px-4 pb-8">
         {activeTab === "overview" && (
           <OverviewTab
             overview={overview}
-            endpoints={endpoints}
-            windowsSummary={windowsSummary}
             complianceRate={complianceRate}
-            windowsComplianceRate={windowsComplianceRate}
             criticalIssues={criticalIssues}
-          />
-        )}
-
-        {activeTab === "security" && (
-          <SecurityTab
-            overview={overview}
+            windowsComplianceRate={windowsComplianceRate}
             endpoints={endpoints}
-            complianceFilter={complianceFilter}
-            setComplianceFilter={setComplianceFilter}
+            criticalVulnDetails={criticalVulnDetails}
+            vulnerabilityTrends={vulnerabilityTrends}
           />
         )}
-
+        {activeTab === "security" && (
+          <SecurityTab overview={overview} endpoints={endpoints} />
+        )}
         {activeTab === "compliance" && (
-          <WindowsComplianceTab
+          <ComplianceTab
             overview={overview}
             windowsSummary={windowsSummary}
             windowsComplianceRate={windowsComplianceRate}
           />
         )}
-
         {activeTab === "endpoints" && (
           <EndpointsTab
             endpoints={endpoints}
             complianceFilter={complianceFilter}
-            windowsFilter={windowsFilter}
             setComplianceFilter={setComplianceFilter}
+            windowsFilter={windowsFilter}
             setWindowsFilter={setWindowsFilter}
+          />
+        )}
+        {activeTab === "vulnerabilities" && (
+          <VulnerabilitiesTab
+            overview={overview}
+            endpoints={endpoints}
+            criticalVulnDetails={criticalVulnDetails}
+            isLoading={vulnLoading}
+            hideD9Managed={false}
+            isAdmin={session.user.role === "ADMIN"}
           />
         )}
       </div>
@@ -257,272 +208,172 @@ export function TenantDashboardClient({
   );
 }
 
-// Status Badge Component
-function StatusBadge({
-  label,
-  value,
-  status,
-  urgent,
-}: {
-  label: string;
-  value: string | number;
-  status: "excellent" | "good" | "attention" | "critical";
-  urgent?: boolean;
-}) {
-  const statusConfig = {
-    excellent: {
-      bg: "bg-green-100",
-      text: "text-green-700",
-      indicator: "bg-green-500",
-    },
-    good: {
-      bg: "bg-blue-100",
-      text: "text-blue-700",
-      indicator: "bg-blue-500",
-    },
-    attention: {
-      bg: "bg-orange-100",
-      text: "text-orange-700",
-      indicator: "bg-orange-500",
-    },
-    critical: {
-      bg: "bg-red-100",
-      text: "text-red-700",
-      indicator: "bg-red-500",
-    },
-  };
-
-  const config = statusConfig[status];
-
-  return (
-    <div
-      className={`flex items-center space-x-2 rounded-lg ${config.bg} px-3 py-1.5 ${urgent ? "animate-pulse" : ""}`}
-    >
-      <div className={`h-2 w-2 rounded-full ${config.indicator}`}></div>
-      <div className="text-sm">
-        <span className="text-gray-600">{label}:</span>
-        <span className={`ml-1 font-semibold ${config.text}`}>{value}</span>
-      </div>
-    </div>
-  );
-}
-
-// Tab Button Component
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-  badge,
-  urgent,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: string;
-  label: string;
-  badge?: number;
-  urgent?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center space-x-2 border-b-2 px-1 py-4 text-sm font-medium transition-all duration-200 ${
-        active
-          ? "border-blue-500 text-blue-600"
-          : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-      }`}
-    >
-      <span className="text-base">{icon}</span>
-      <span>{label}</span>
-      {badge !== undefined && badge > 0 && (
-        <span
-          className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-2 text-xs font-bold ${
-            urgent
-              ? "animate-pulse bg-red-500 text-white"
-              : "bg-blue-100 text-blue-700"
-          }`}
-        >
-          {badge}
-        </span>
-      )}
-    </button>
-  );
-}
-
-// Overview Tab
+/* Overview Tab - ENHANCED WITH VULNERABILITY DETAILS */
 function OverviewTab({
   overview,
-  endpoints,
-  windowsSummary,
   complianceRate,
-  windowsComplianceRate,
   criticalIssues,
+  windowsComplianceRate,
+  endpoints,
+  criticalVulnDetails,
+  vulnerabilityTrends,
 }: any) {
   return (
-    <div className="space-y-8">
-      {/* Critical Issues Alert */}
-      {criticalIssues > 0 && (
-        <div className="rounded-xl border border-red-200 bg-gradient-to-r from-red-50 to-pink-50 p-6">
-          <div className="flex items-start space-x-3">
-            <div className="animate-pulse text-2xl">🚨</div>
-            <div>
-              <h3 className="font-semibold text-red-900">
-                Critical Issues Require Attention
-              </h3>
-              <div className="mt-2 space-y-1 text-sm text-red-800">
-                {overview.stats.vulnerabilities.critical > 0 && (
-                  <p>
-                    • {overview.stats.vulnerabilities.critical} critical
-                    vulnerabilities detected
-                  </p>
-                )}
-                {overview.stats.endpoints.nonCompliant > 0 && (
-                  <p>
-                    • {overview.stats.endpoints.nonCompliant} non-compliant
-                    endpoints
-                  </p>
-                )}
-                {overview.stats.windows.outdated > 0 && (
-                  <p>
-                    • {overview.stats.windows.outdated} Windows systems need
-                    updates
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+    <div className="space-y-6">
       {/* Key Metrics Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          title="Overall Compliance"
+          title="Total Endpoints"
+          value={overview.stats.endpoints.total}
+          icon="💻"
+          color="blue"
+        />
+        <MetricCard
+          title="Compliance Rate"
           value={`${complianceRate}%`}
-          subtitle={`${overview.stats.endpoints.compliant} of ${overview.stats.endpoints.total} endpoints`}
-          icon="🎯"
+          icon="✅"
           color={
-            complianceRate >= 90
+            complianceRate >= 80
               ? "green"
-              : complianceRate >= 70
+              : complianceRate >= 60
                 ? "orange"
                 : "red"
           }
           trend={
-            complianceRate >= 90
-              ? "excellent"
-              : complianceRate >= 70
-                ? "good"
-                : "needs-attention"
+            vulnerabilityTrends?.summary?.netChange > 0
+              ? "up"
+              : vulnerabilityTrends?.summary?.netChange < 0
+                ? "down"
+                : "stable"
           }
         />
         <MetricCard
-          title="Critical Threats"
-          value={overview.stats.vulnerabilities.critical}
-          subtitle={`${overview.stats.vulnerabilities.high} high priority`}
+          title="Critical Issues"
+          value={criticalIssues}
           icon="🚨"
-          color={
-            overview.stats.vulnerabilities.critical === 0 ? "green" : "red"
-          }
-          urgent={overview.stats.vulnerabilities.critical > 0}
+          color={criticalIssues === 0 ? "green" : "red"}
         />
         <MetricCard
           title="Windows Compliance"
           value={`${windowsComplianceRate}%`}
-          subtitle={`${overview.stats.windows.compliant} of ${overview.stats.windows.total} up to date`}
           icon="🪟"
           color={
-            windowsComplianceRate >= 90
+            windowsComplianceRate >= 80
               ? "green"
-              : windowsComplianceRate >= 70
+              : windowsComplianceRate >= 60
                 ? "orange"
                 : "red"
           }
         />
-        <MetricCard
-          title="Total Endpoints"
-          value={overview.stats.endpoints.total}
-          subtitle={`${overview.stats.endpoints.stale || 0} haven't reported recently`}
-          icon="💻"
-          color="blue"
-        />
       </div>
 
-      {/* Windows Version Health */}
-      {overview.stats.windows.total > 0 && (
+      {/* Enhanced: Most Vulnerable Apps */}
+      {criticalVulnDetails?.summary?.mostVulnerableApps?.length > 0 && (
         <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-          <h3 className="mb-6 flex items-center space-x-2 text-lg font-semibold">
-            <span>🪟</span>
-            <span>Windows Version Health</span>
+          <h3 className="mb-4 text-lg font-semibold">
+            🎯 Most Vulnerable Applications
           </h3>
-
-          <div className="mb-6 grid gap-4 md:grid-cols-3">
-            <div className="rounded-lg bg-green-50 p-4 text-center">
-              <div className="mb-1 text-3xl font-bold text-green-600">
-                {overview.stats.windows.compliant}
-              </div>
-              <p className="text-sm font-medium text-green-700">
-                Latest Versions
-              </p>
-              <p className="text-xs text-gray-600">Fully supported & secure</p>
-            </div>
-            <div className="rounded-lg bg-orange-50 p-4 text-center">
-              <div className="mb-1 text-3xl font-bold text-orange-600">
-                {overview.stats.windows.outdated}
-              </div>
-              <p className="text-sm font-medium text-orange-700">
-                Need Updates
-              </p>
-              <p className="text-xs text-gray-600">Security risk</p>
-            </div>
-            <div className="rounded-lg bg-gray-50 p-4 text-center">
-              <div className="mb-1 text-3xl font-bold text-gray-600">
-                {overview.stats.windows.unknown}
-              </div>
-              <p className="text-sm font-medium text-gray-700">
-                Unknown Version
-              </p>
-              <p className="text-xs text-gray-600">Requires investigation</p>
-            </div>
-          </div>
-
-          {/* Version Breakdown */}
           <div className="space-y-3">
-            {overview.stats.windows.versions.map(
-              (version: any, index: number) => (
+            {criticalVulnDetails.summary.mostVulnerableApps
+              .slice(0, 5)
+              .map((app: any, idx: number) => (
                 <div
-                  key={index}
-                  className={`flex items-center justify-between rounded-lg border p-4 ${
-                    version.isLatest
-                      ? "border-green-200 bg-green-50"
-                      : "border-orange-200 bg-orange-50"
-                  }`}
+                  key={idx}
+                  className="flex items-center justify-between rounded-lg border p-4 hover:bg-gray-50"
                 >
                   <div>
-                    <div className="font-medium">{version.displayName}</div>
+                    <div className="font-medium">{app.appName}</div>
                     <div className="text-sm text-gray-600">
-                      {version.count} systems
+                      Affects {app.affectedEndpointsCount} machine
+                      {app.affectedEndpointsCount !== 1 ? "s" : ""}
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
-                    <span
-                      className={`rounded-full px-3 py-1 text-sm font-medium ${
-                        version.isLatest
-                          ? "bg-green-100 text-green-800"
-                          : "bg-orange-100 text-orange-800"
-                      }`}
-                    >
-                      {version.isLatest ? "✅ Latest" : "⚠️ Update Available"}
-                    </span>
+                    {app.criticalCount > 0 && (
+                      <span className="rounded bg-red-500 px-3 py-1 text-xs font-bold text-white">
+                        🚨 {app.criticalCount} Critical
+                      </span>
+                    )}
+                    {app.highCount > 0 && (
+                      <span className="rounded bg-orange-500 px-3 py-1 text-xs font-bold text-white">
+                        ⚠️ {app.highCount} High
+                      </span>
+                    )}
                   </div>
                 </div>
-              ),
-            )}
+              ))}
+          </div>
+          <div className="mt-4 text-center">
+            <button
+              onClick={() => {
+                // This would switch to vulnerabilities tab
+                window.dispatchEvent(
+                  new CustomEvent("switchTab", { detail: "vulnerabilities" }),
+                );
+              }}
+              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              View All Vulnerable Applications →
+            </button>
           </div>
         </div>
       )}
 
-      {/* Recent Endpoints Activity */}
+      {/* Vulnerability Breakdown */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+          <h3 className="mb-4 text-lg font-semibold">Vulnerability Overview</h3>
+          <div className="space-y-3">
+            <VulnBar
+              label="Critical"
+              count={overview.stats.vulnerabilities.critical}
+              color="bg-red-500"
+            />
+            <VulnBar
+              label="High"
+              count={overview.stats.vulnerabilities.high}
+              color="bg-orange-500"
+            />
+            <VulnBar
+              label="Medium"
+              count={overview.stats.vulnerabilities.medium}
+              color="bg-yellow-500"
+            />
+            <VulnBar
+              label="Low"
+              count={overview.stats.vulnerabilities.low}
+              color="bg-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+          <h3 className="mb-4 text-lg font-semibold">Windows Version Status</h3>
+          <div className="space-y-3">
+            <StatRow
+              label="Total Windows Systems"
+              value={overview.stats.windows.total}
+            />
+            <StatRow
+              label="Compliant Systems"
+              value={overview.stats.windows.compliant}
+              valueColor="text-green-600"
+            />
+            <StatRow
+              label="Outdated Systems"
+              value={overview.stats.windows.outdated}
+              valueColor="text-orange-600"
+            />
+            <StatRow
+              label="Unknown Versions"
+              value={overview.stats.windows.unknown}
+              valueColor="text-gray-600"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Endpoints Requiring Attention */}
       <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
         <div className="mb-6 flex items-center justify-between">
           <h3 className="text-lg font-semibold">
@@ -544,21 +395,20 @@ function OverviewTab({
           <div className="space-y-3">
             {endpoints.endpoints
               .filter(
-                (endpoint: any) =>
-                  !endpoint.isCompliant ||
-                  endpoint.criticalVulns > 0 ||
-                  endpoint.highVulns > 0 ||
-                  endpoint.windows?.needsUpdate,
+                (e: any) =>
+                  !e.isCompliant ||
+                  e.criticalVulns > 0 ||
+                  e.highVulns > 0 ||
+                  e.windows?.needsUpdate,
               )
               .slice(0, 10)
               .map((endpoint: any) => (
-                <PriorityEndpointCard key={endpoint.id} endpoint={endpoint} />
+                <EndpointCard key={endpoint.id} endpoint={endpoint} />
               ))}
           </div>
         ) : (
           <div className="py-8 text-center text-gray-500">
-            <div className="mb-2 text-4xl">✅</div>
-            <p>All endpoints are compliant!</p>
+            🎉 All endpoints are compliant and secure!
           </div>
         )}
       </div>
@@ -566,147 +416,184 @@ function OverviewTab({
   );
 }
 
-// Security Tab
-function SecurityTab({
-  overview,
-  endpoints,
-  complianceFilter,
-  setComplianceFilter,
-}: any) {
-  const totalVulns =
-    overview.stats.vulnerabilities.critical +
-    overview.stats.vulnerabilities.high +
-    overview.stats.vulnerabilities.medium +
-    overview.stats.vulnerabilities.low;
-
+/* Security Tab - RESTORED */
+function SecurityTab({ overview, endpoints }: any) {
   return (
-    <div className="space-y-8">
-      {/* Security Summary */}
-      <div className="grid gap-6 md:grid-cols-4">
-        <ThreatLevelCard
-          level="Critical"
-          count={overview.stats.vulnerabilities.critical}
-          color="red"
-          icon="🚨"
-          description="Immediate action required"
-        />
-        <ThreatLevelCard
-          level="High"
-          count={overview.stats.vulnerabilities.high}
-          color="orange"
-          icon="⚠️"
-          description="Address within 24-48 hours"
-        />
-        <ThreatLevelCard
-          level="Medium"
-          count={overview.stats.vulnerabilities.medium}
-          color="yellow"
-          icon="⚡"
-          description="Schedule for remediation"
-        />
-        <ThreatLevelCard
-          level="Low"
-          count={overview.stats.vulnerabilities.low}
-          color="blue"
-          icon="📋"
-          description="Monitor and patch cycles"
-        />
-      </div>
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold">Security Overview</h2>
 
-      {/* Security Filter */}
-      <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-        <div className="mb-6 flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Security Status by Endpoint</h3>
-          <select
-            value={complianceFilter}
-            onChange={(e) => setComplianceFilter(e.target.value as any)}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-          >
-            <option value="all">All Endpoints</option>
-            <option value="non-compliant">Non-Compliant Only</option>
-            <option value="compliant">Compliant Only</option>
-          </select>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+          <h3 className="mb-4 text-lg font-semibold">Security Metrics</h3>
+          <div className="space-y-4">
+            <div className="flex justify-between">
+              <span>Infected Endpoints</span>
+              <span className="font-semibold text-red-600">
+                {endpoints?.endpoints?.filter((e: any) => e.isInfected)
+                  .length || 0}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Active Threats</span>
+              <span className="font-semibold text-orange-600">
+                {endpoints?.endpoints?.reduce(
+                  (sum: number, e: any) => sum + (e.activeThreats || 0),
+                  0,
+                ) || 0}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Missing Patches</span>
+              <span className="font-semibold text-yellow-600">
+                {endpoints?.endpoints?.filter(
+                  (e: any) => e.windows?.needsUpdate,
+                ).length || 0}
+              </span>
+            </div>
+          </div>
         </div>
 
-        {endpoints?.endpoints?.length ? (
-          <div className="space-y-3">
-            {endpoints.endpoints.map((endpoint: any) => (
-              <SecurityEndpointCard key={endpoint.id} endpoint={endpoint} />
-            ))}
+        <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+          <h3 className="mb-4 text-lg font-semibold">
+            Most Vulnerable Endpoints
+          </h3>
+          <div className="space-y-2">
+            {endpoints?.endpoints
+              ?.sort(
+                (a: any, b: any) =>
+                  b.criticalVulns +
+                  b.highVulns -
+                  (a.criticalVulns + a.highVulns),
+              )
+              .slice(0, 5)
+              .map((endpoint: any) => (
+                <div
+                  key={endpoint.id}
+                  className="flex items-center justify-between rounded border p-2"
+                >
+                  <span className="font-medium">{endpoint.hostname}</span>
+                  <div className="flex space-x-2">
+                    {endpoint.criticalVulns > 0 && (
+                      <span className="rounded bg-red-100 px-2 py-1 text-xs text-red-800">
+                        {endpoint.criticalVulns} Critical
+                      </span>
+                    )}
+                    {endpoint.highVulns > 0 && (
+                      <span className="rounded bg-orange-100 px-2 py-1 text-xs text-orange-800">
+                        {endpoint.highVulns} High
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
           </div>
-        ) : (
-          <div className="py-8 text-center text-gray-500">
-            <p>No endpoints match the current filter.</p>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
 }
 
-// Windows Compliance Tab
-function WindowsComplianceTab({
+/* Compliance Tab - RESTORED */
+function ComplianceTab({
   overview,
   windowsSummary,
   windowsComplianceRate,
 }: any) {
-  if (!windowsSummary || windowsSummary.endpoints.length === 0) {
-    return (
-      <div className="rounded-xl bg-gray-50 py-12 text-center">
-        <div className="mb-4 text-6xl">🪟</div>
-        <h2 className="mb-2 text-xl font-semibold text-gray-900">
-          No Windows Endpoints
-        </h2>
-        <p className="text-gray-600">
-          No Windows systems found in this tenant.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-8">
-      {/* Windows Compliance Summary */}
-      <div className="grid gap-6 md:grid-cols-4">
-        <WindowsMetricCard
-          title="Total Windows"
-          value={overview.stats.windows.total}
-          icon="🪟"
-          color="blue"
-        />
-        <WindowsMetricCard
-          title="Latest Versions"
-          value={overview.stats.windows.compliant}
-          icon="✅"
-          color="green"
-        />
-        <WindowsMetricCard
-          title="Need Updates"
-          value={overview.stats.windows.outdated}
-          icon="⚠️"
-          color="orange"
-          urgent={overview.stats.windows.outdated > 0}
-        />
-        <WindowsMetricCard
-          title="Compliance Rate"
-          value={`${windowsComplianceRate}%`}
-          icon="📊"
-          color={
-            windowsComplianceRate >= 90
-              ? "green"
-              : windowsComplianceRate >= 70
-                ? "orange"
-                : "red"
-          }
-        />
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold">Compliance Status</h2>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+          <h3 className="mb-4 text-lg font-semibold">Overall Compliance</h3>
+          <div className="space-y-4">
+            <div className="flex justify-between">
+              <span>Compliant Endpoints</span>
+              <span className="font-semibold text-green-600">
+                {overview.stats.endpoints.compliant}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Non-Compliant Endpoints</span>
+              <span className="font-semibold text-red-600">
+                {overview.stats.endpoints.nonCompliant}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Windows Compliance Rate</span>
+              <span
+                className={`font-semibold ${windowsComplianceRate >= 80 ? "text-green-600" : "text-red-600"}`}
+              >
+                {windowsComplianceRate}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {windowsSummary && (
+          <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+            <h3 className="mb-4 text-lg font-semibold">
+              Windows Version Distribution
+            </h3>
+            <div className="space-y-2">
+              {overview.stats.windows.versions?.map(
+                (version: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between rounded border p-2"
+                  >
+                    <span>{version.displayName}</span>
+                    <span className="font-medium">{version.count}</span>
+                  </div>
+                ),
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Endpoints Tab - RESTORED */
+function EndpointsTab({
+  endpoints,
+  complianceFilter,
+  setComplianceFilter,
+  windowsFilter,
+  setWindowsFilter,
+}: any) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Endpoint Management</h2>
+        <div className="flex space-x-3">
+          <select
+            value={complianceFilter}
+            onChange={(e) => setComplianceFilter(e.target.value)}
+            className="rounded border border-gray-300 px-3 py-1 text-sm"
+          >
+            <option value="all">All Endpoints</option>
+            <option value="compliant">Compliant Only</option>
+            <option value="non-compliant">Non-Compliant Only</option>
+          </select>
+          <select
+            value={windowsFilter}
+            onChange={(e) => setWindowsFilter(e.target.value)}
+            className="rounded border border-gray-300 px-3 py-1 text-sm"
+          >
+            <option value="all">All Windows Versions</option>
+            <option value="latest">Latest Versions</option>
+            <option value="outdated">Outdated Versions</option>
+            <option value="unknown">Unknown Versions</option>
+          </select>
+        </div>
       </div>
 
-      {/* Detailed Windows Endpoints */}
-      <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-        <h3 className="mb-6 text-lg font-semibold">Windows Systems Detail</h3>
-        <div className="space-y-3">
-          {windowsSummary.endpoints.map((endpoint: any) => (
-            <WindowsEndpointCard key={endpoint.id} endpoint={endpoint} />
+      <div className="overflow-hidden rounded-xl bg-white/80 shadow-lg backdrop-blur-sm">
+        <div className="divide-y divide-gray-200">
+          {endpoints?.endpoints?.map((endpoint: any) => (
+            <EndpointDetailCard key={endpoint.id} endpoint={endpoint} />
           ))}
         </div>
       </div>
@@ -714,217 +601,206 @@ function WindowsComplianceTab({
   );
 }
 
-// Endpoints Tab
-function EndpointsTab({
+/* Enhanced Vulnerabilities Tab - FULLY FUNCTIONAL */
+function VulnerabilitiesTab({
+  overview,
   endpoints,
-  complianceFilter,
-  windowsFilter,
-  setComplianceFilter,
-  setWindowsFilter,
+  criticalVulnDetails,
+  isLoading,
+  hideD9Managed,
+  isAdmin,
 }: any) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <div className="text-center">
+          <div className="mb-4 text-4xl">🔍</div>
+          <h3 className="mb-2 text-lg font-semibold">
+            Analyzing Vulnerabilities...
+          </h3>
+          <p className="text-gray-600">
+            Loading detailed vulnerability data by machine and application
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!criticalVulnDetails?.endpoints?.length) {
+    return (
+      <div className="space-y-6">
+        {/* Still show summary even with no critical vulns */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
+            <h3 className="mb-4 text-lg font-semibold">
+              Vulnerability Breakdown
+            </h3>
+            <div className="space-y-3">
+              <VulnBar
+                label="Critical Vulnerabilities"
+                count={overview.stats.vulnerabilities.critical}
+                color="bg-red-500"
+              />
+              <VulnBar
+                label="High Vulnerabilities"
+                count={overview.stats.vulnerabilities.high}
+                color="bg-orange-500"
+              />
+              <VulnBar
+                label="Medium Vulnerabilities"
+                count={overview.stats.vulnerabilities.medium}
+                color="bg-yellow-500"
+              />
+              <VulnBar
+                label="Low Vulnerabilities"
+                count={overview.stats.vulnerabilities.low}
+                color="bg-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-white/80 p-8 text-center shadow-lg backdrop-blur-sm">
+            <div className="mb-4 text-4xl">🎉</div>
+            <h3 className="mb-2 text-lg font-semibold text-green-600">
+              No Critical/High Vulnerabilities Found!
+            </h3>
+            <p className="text-gray-600">
+              {hideD9Managed && isAdmin
+                ? "No critical/high vulnerabilities in non-D9 managed applications."
+                : "Your systems are secure from critical and high-risk vulnerabilities."}
+            </p>
+            {overview.stats.vulnerabilities.medium > 0 && (
+              <p className="mt-2 text-sm text-yellow-600">
+                ⚠️ You still have {overview.stats.vulnerabilities.medium}{" "}
+                medium-risk vulnerabilities to review
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Filters */}
-      <div className="rounded-xl bg-white/80 p-4 shadow-sm backdrop-blur-sm">
-        <div className="flex items-center space-x-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Compliance Status
-            </label>
-            <select
-              value={complianceFilter}
-              onChange={(e) => setComplianceFilter(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-            >
-              <option value="all">All Endpoints</option>
-              <option value="compliant">Compliant Only</option>
-              <option value="non-compliant">Non-Compliant Only</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Windows Version
-            </label>
-            <select
-              value={windowsFilter}
-              onChange={(e) => setWindowsFilter(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-            >
-              <option value="all">All Windows Versions</option>
-              <option value="latest">Latest Only</option>
-              <option value="outdated">Outdated Only</option>
-              <option value="unknown">Unknown Version</option>
-            </select>
-          </div>
-        </div>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          title="Affected Machines"
+          value={criticalVulnDetails.summary.totalEndpointsAffected}
+          icon="💻"
+          color="red"
+        />
+        <MetricCard
+          title="Critical Vulnerabilities"
+          value={criticalVulnDetails.summary.totalCriticalVulns}
+          icon="🚨"
+          color="red"
+        />
+        <MetricCard
+          title="High Risk Vulnerabilities"
+          value={criticalVulnDetails.summary.totalHighVulns}
+          icon="⚠️"
+          color="orange"
+        />
+        <MetricCard
+          title="Vulnerable Apps"
+          value={criticalVulnDetails.summary.mostVulnerableApps?.length || 0}
+          icon="📱"
+          color="purple"
+        />
       </div>
 
-      {/* Endpoints List */}
-      <div className="rounded-xl bg-white/80 p-6 shadow-lg backdrop-blur-sm">
-        <div className="mb-6 flex items-center justify-between">
-          <h3 className="text-lg font-semibold">All Endpoints</h3>
-          <span className="text-sm text-gray-500">
-            {endpoints?.endpoints?.length || 0} endpoints
-          </span>
-        </div>
-
-        {endpoints?.endpoints?.length ? (
-          <div className="space-y-3">
-            {endpoints.endpoints.map((endpoint: any) => (
-              <DetailedEndpointCard key={endpoint.id} endpoint={endpoint} />
-            ))}
-          </div>
-        ) : (
-          <div className="py-8 text-center text-gray-500">
-            <p>No endpoints match the current filters.</p>
+      {/* Filter Information */}
+      {hideD9Managed &&
+        isAdmin &&
+        criticalVulnDetails.d9ManagedAppsHidden > 0 && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <div className="flex items-center">
+              <div className="mr-2 text-blue-600">ℹ️</div>
+              <div className="text-blue-800">
+                Hiding {criticalVulnDetails.d9ManagedAppsHidden} D9-managed
+                applications from results.
+                <button className="ml-2 text-sm text-blue-600 underline hover:text-blue-700">
+                  Manage D9 Apps →
+                </button>
+              </div>
+            </div>
           </div>
         )}
+
+      {/* Machine-by-Machine Breakdown */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">
+          🖥️ Machines Requiring Immediate Attention
+        </h3>
+        {criticalVulnDetails.endpoints.map((endpointData: any) => (
+          <EndpointVulnerabilityCard
+            key={endpointData.endpoint.id}
+            data={endpointData}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-// Helper Components
-function LoadingDashboard() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600"></div>
-        <p className="text-lg text-gray-600">Loading dashboard...</p>
-      </div>
-    </div>
-  );
-}
-
-function ErrorState({
-  tenantSlug,
-  isAdmin,
-}: {
-  tenantSlug: string;
-  isAdmin: boolean;
-}) {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <div className="mb-4 text-6xl">⚠️</div>
-        <h1 className="mb-4 text-2xl font-bold text-red-600">
-          {isAdmin ? "Tenant Not Found" : "Access Denied"}
-        </h1>
-        <p className="mb-4 text-gray-600">
-          {isAdmin
-            ? `No tenant found with slug '${tenantSlug}' or you don't have access.`
-            : "Unable to load tenant data or insufficient permissions."}
-        </p>
-        <Link
-          href={isAdmin ? "/admin/dashboard" : "/auth/signin"}
-          className="text-blue-600 hover:underline"
-        >
-          {isAdmin ? "← Back to Admin Dashboard" : "Sign in again"}
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  subtitle,
-  icon,
-  color,
-  trend,
-  urgent,
-}: any) {
+/* Helper Components - RESTORED */
+function MetricCard({ title, value, icon, color }: any) {
   const colorClasses = {
-    blue: "from-blue-500 to-blue-600",
-    green: "from-green-500 to-green-600",
-    orange: "from-orange-500 to-orange-600",
-    red: "from-red-500 to-red-600",
-    purple: "from-purple-500 to-purple-600",
+    red: "bg-red-50 border-red-200 text-red-800",
+    orange: "bg-orange-50 border-orange-200 text-orange-800",
+    yellow: "bg-yellow-50 border-yellow-200 text-yellow-800",
+    blue: "bg-blue-50 border-blue-200 text-blue-800",
+    purple: "bg-purple-50 border-purple-200 text-purple-800",
+    green: "bg-green-50 border-green-200 text-green-800",
   };
 
   return (
     <div
-      className={`rounded-xl bg-gradient-to-br ${colorClasses[color]} transform p-6 text-white shadow-lg transition-all duration-200 hover:scale-105 ${urgent ? "animate-pulse" : ""}`}
+      className={`rounded-xl border p-6 ${colorClasses[color] || colorClasses.blue}`}
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-white/80">{title}</p>
-          <p className="mt-2 text-3xl font-bold">{value}</p>
-          {subtitle && <p className="mt-1 text-sm text-white/70">{subtitle}</p>}
-          {trend && (
-            <p className="mt-1 text-xs text-white/60">
-              {trend === "excellent"
-                ? "🎯 Excellent"
-                : trend === "good"
-                  ? "👍 Good"
-                  : "⚠️ Needs Attention"}
-            </p>
-          )}
+          <p className="text-sm font-medium opacity-75">{title}</p>
+          <p className="text-2xl font-bold">{value}</p>
         </div>
-        <div className="text-3xl opacity-80">{icon}</div>
+        <div className="text-2xl">{icon}</div>
       </div>
     </div>
   );
 }
 
-function ThreatLevelCard({ level, count, color, icon, description }: any) {
-  const colorClasses = {
-    red: "border-red-200 bg-red-50 text-red-700",
-    orange: "border-orange-200 bg-orange-50 text-orange-700",
-    yellow: "border-yellow-200 bg-yellow-50 text-yellow-700",
-    blue: "border-blue-200 bg-blue-50 text-blue-700",
-  };
-
+function VulnBar({ label, count, color }: any) {
   return (
-    <div
-      className={`rounded-xl border p-6 ${colorClasses[color]} ${count > 0 && color === "red" ? "animate-pulse" : ""}`}
-    >
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-2xl">{icon}</span>
-        <div className="text-right">
-          <div className="text-2xl font-bold">{count}</div>
-          <div className="text-sm font-medium">{level}</div>
-        </div>
+    <div className="flex items-center justify-between">
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center space-x-2">
+        <div className={`h-2 w-16 rounded ${color} opacity-60`}></div>
+        <span className="font-semibold">{count}</span>
       </div>
-      <p className="text-sm">{description}</p>
     </div>
   );
 }
 
-function WindowsMetricCard({ title, value, icon, color, urgent }: any) {
-  const colorClasses = {
-    blue: "bg-blue-50 border-blue-200",
-    green: "bg-green-50 border-green-200",
-    orange: "bg-orange-50 border-orange-200",
-    red: "bg-red-50 border-red-200",
-  };
-
+function StatRow({ label, value, valueColor = "text-gray-900" }: any) {
   return (
-    <div
-      className={`rounded-xl border p-6 ${colorClasses[color]} ${urgent ? "animate-pulse" : ""}`}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900">{value}</p>
-        </div>
-        <div className="text-3xl">{icon}</div>
-      </div>
+    <div className="flex justify-between">
+      <span className="text-sm">{label}</span>
+      <span className={`font-semibold ${valueColor}`}>{value}</span>
     </div>
   );
 }
 
-function PriorityEndpointCard({ endpoint }: any) {
+function EndpointCard({ endpoint }: any) {
   const hasProblems =
     !endpoint.isCompliant ||
     endpoint.criticalVulns > 0 ||
-    endpoint.highVulns > 0 ||
-    endpoint.windows?.needsUpdate;
+    endpoint.highVulns > 0;
 
   return (
     <div
-      className={`rounded-lg border p-4 transition-all ${hasProblems ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}`}
+      className={`rounded-lg border p-4 ${hasProblems ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}`}
     >
       <div className="flex items-center justify-between">
         <div>
@@ -958,92 +834,220 @@ function PriorityEndpointCard({ endpoint }: any) {
   );
 }
 
-function SecurityEndpointCard({ endpoint }: any) {
+/* Individual Endpoint Vulnerability Card - ENHANCED */
+function EndpointVulnerabilityCard({ data }: { data: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const { endpoint, vulnerableApps, totalCritical, totalHigh } = data;
+
   return (
-    <div
-      className={`rounded-lg border p-4 ${endpoint.isCompliant ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <h4 className="font-medium">{endpoint.hostname}</h4>
-          <p className="text-sm text-gray-600">{endpoint.operatingSystem}</p>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span
-            className={`rounded-full px-3 py-1 text-sm font-medium ${endpoint.isCompliant ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-          >
-            {endpoint.isCompliant ? "✅ Secure" : "❌ Issues"}
-          </span>
-          <div className="text-right text-sm">
-            <div>
-              C:{endpoint.criticalVulns} H:{endpoint.highVulns}
+    <div className="overflow-hidden rounded-xl bg-white/80 shadow-lg backdrop-blur-sm">
+      {/* Header */}
+      <div
+        className="cursor-pointer p-6 transition-colors hover:bg-gray-50/50"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center space-x-3">
+              <h4 className="text-lg font-semibold">{endpoint.hostname}</h4>
+              <div className="flex items-center space-x-2">
+                {totalCritical > 0 && (
+                  <span className="rounded bg-red-500 px-3 py-1 text-sm font-bold text-white">
+                    🚨 {totalCritical} Critical
+                  </span>
+                )}
+                {totalHigh > 0 && (
+                  <span className="rounded bg-orange-500 px-3 py-1 text-sm font-bold text-white">
+                    ⚠️ {totalHigh} High
+                  </span>
+                )}
+              </div>
             </div>
-            <div>
-              M:{endpoint.mediumVulns} L:{endpoint.lowVulns}
+            <div className="mt-1 text-sm text-gray-600">
+              {endpoint.operatingSystem} •{" "}
+              {endpoint.client?.name || "Unassigned"} •{vulnerableApps.length}{" "}
+              vulnerable app{vulnerableApps.length !== 1 ? "s" : ""} • Last
+              seen:{" "}
+              {endpoint.lastSeen
+                ? new Date(endpoint.lastSeen).toLocaleDateString()
+                : "Never"}
             </div>
+          </div>
+          <div className="flex items-center space-x-3">
+            <div className="text-right text-xs text-gray-500">
+              Click to {expanded ? "collapse" : "expand"}
+            </div>
+            <div className="text-lg text-gray-400">{expanded ? "▼" : "▶"}</div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function WindowsEndpointCard({ endpoint }: any) {
-  const needsUpdate = !endpoint.analysis.isLatest;
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="border-t bg-gray-50/50 px-6 py-4">
+          <h5 className="mb-4 font-medium text-gray-900">
+            📱 Vulnerable Applications on this machine:
+          </h5>
+          <div className="space-y-4">
+            {vulnerableApps.map((app: any, idx: number) => (
+              <div
+                key={idx}
+                className="rounded-lg border bg-white p-4 shadow-sm"
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="font-medium text-gray-900">{app.appName}</div>
+                  <div className="flex items-center space-x-2">
+                    {app.criticalCount > 0 && (
+                      <span className="rounded bg-red-100 px-2 py-1 text-xs font-medium text-red-800">
+                        {app.criticalCount} Critical
+                      </span>
+                    )}
+                    {app.highCount > 0 && (
+                      <span className="rounded bg-orange-100 px-2 py-1 text-xs font-medium text-orange-800">
+                        {app.highCount} High
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-  return (
-    <div
-      className={`rounded-lg border p-4 ${needsUpdate ? "border-orange-200 bg-orange-50" : "border-green-200 bg-green-50"}`}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <h4 className="font-medium">{endpoint.hostname}</h4>
-          <p className="text-sm text-gray-600">
-            {endpoint.operatingSystem} {endpoint.osVersion}
-          </p>
-          {endpoint.analysis.recommendedVersion && needsUpdate && (
-            <p className="text-sm text-orange-700">
-              Recommended: {endpoint.analysis.recommendedVersion}
-            </p>
-          )}
+                {/* Individual Vulnerabilities */}
+                <div className="space-y-2">
+                  {app.vulnerabilities
+                    .slice(0, 3)
+                    .map((vuln: any, vIdx: number) => (
+                      <div
+                        key={vIdx}
+                        className="border-l-2 border-gray-200 pl-3 text-sm"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">
+                            {vuln.cveId || vuln.title?.substring(0, 50) + "..."}
+                          </span>
+                          <span
+                            className={`rounded px-2 py-1 text-xs font-medium ${
+                              vuln.severity === "CRITICAL"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-orange-100 text-orange-800"
+                            }`}
+                          >
+                            {vuln.severity}{" "}
+                            {vuln.cvssScore && `(${vuln.cvssScore})`}
+                          </span>
+                        </div>
+                        {vuln.version && (
+                          <div className="mt-1 text-gray-600">
+                            Version: {vuln.version}
+                          </div>
+                        )}
+                        <div className="mt-1 text-xs text-gray-500">
+                          Detected:{" "}
+                          {new Date(vuln.detectedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    ))}
+                  {app.vulnerabilities.length > 3 && (
+                    <div className="pl-3 text-sm font-medium text-blue-600">
+                      ... and {app.vulnerabilities.length - 3} more
+                      vulnerabilities in this application
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-gray-500">
+                      💡 Action needed: Update{" "}
+                      {app.product || "this application"} to latest version
+                    </div>
+                    <button className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                      View Details →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-        <span
-          className={`rounded-full px-3 py-1 text-sm font-medium ${endpoint.analysis.isLatest ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}`}
-        >
-          {endpoint.analysis.isLatest ? "✅ Latest" : "⚠️ Update Available"}
-        </span>
-      </div>
+      )}
     </div>
   );
 }
 
-function DetailedEndpointCard({ endpoint }: any) {
+function EndpointDetailCard({ endpoint }: any) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md">
+    <div className="p-4 hover:bg-gray-50">
       <div className="flex items-center justify-between">
-        <div>
-          <h4 className="font-medium">{endpoint.hostname}</h4>
-          <p className="text-sm text-gray-600">
-            {endpoint.operatingSystem} • {endpoint.client?.name || "Unassigned"}
-          </p>
-          <p className="text-xs text-gray-500">
-            Last seen:{" "}
+        <div className="flex-1">
+          <div className="flex items-center space-x-3">
+            <h4 className="font-medium">{endpoint.hostname}</h4>
+            <span
+              className={`rounded-full px-2 py-1 text-xs font-medium ${
+                endpoint.isCompliant
+                  ? "bg-green-100 text-green-800"
+                  : "bg-red-100 text-red-800"
+              }`}
+            >
+              {endpoint.isCompliant ? "Compliant" : "Non-Compliant"}
+            </span>
+          </div>
+          <div className="mt-1 text-sm text-gray-600">
+            {endpoint.operatingSystem} • Last seen:{" "}
             {endpoint.lastSeen
               ? new Date(endpoint.lastSeen).toLocaleDateString()
               : "Never"}
-          </p>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span
-            className={`rounded-full px-3 py-1 text-sm font-medium ${endpoint.isCompliant ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-          >
-            {endpoint.isCompliant ? "✅ Compliant" : "❌ Issues"}
-          </span>
-          <div className="text-right text-xs text-gray-500">
-            C:{endpoint.criticalVulns} H:{endpoint.highVulns} M:
-            {endpoint.mediumVulns} L:{endpoint.lowVulns}
           </div>
         </div>
+        <div className="flex items-center space-x-4">
+          <div className="text-right text-sm">
+            <div className="font-medium">Vulnerabilities</div>
+            <div className="text-gray-600">
+              C:{endpoint.criticalVulns} H:{endpoint.highVulns} M:
+              {endpoint.mediumVulns} L:{endpoint.lowVulns}
+            </div>
+          </div>
+          {endpoint.windows?.needsUpdate && (
+            <span className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-800">
+              Update Available
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingDashboard() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <div className="mb-4 text-4xl">⏳</div>
+        <h3 className="mb-2 text-lg font-semibold">Loading Dashboard...</h3>
+        <p className="text-gray-600">
+          Please wait while we gather your security data
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ tenantSlug, isAdmin }: any) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="max-w-md text-center">
+        <div className="mb-4 text-4xl">⚠️</div>
+        <h3 className="mb-2 text-lg font-semibold">Dashboard Unavailable</h3>
+        <p className="mb-4 text-gray-600">
+          Unable to load dashboard data for tenant: {tenantSlug}
+        </p>
+        {isAdmin && (
+          <Link
+            href="/admin/dashboard"
+            className="inline-block rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          >
+            Return to Admin Dashboard
+          </Link>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-// components/admin/AdminDashboard.tsx (Refactored main component)
+// Replace src/app/_components/admin/AdminDashboard.tsx - Re-enable content gradually
 import { useAdminDashboard } from "~/hooks/admin/useAdminDashboard";
 import { AdminDashboardHeader } from "./AdminDashboardHeader";
 import { AdminDashboardNavigation } from "./AdminDashboardNavigation";
@@ -56,6 +56,7 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
         onTabChange={setActiveTab}
       />
 
+      {/* RE-ENABLE CONTENT */}
       <AdminDashboardContent
         activeTab={activeTab}
         globalMetrics={globalMetrics}
@@ -75,36 +76,6 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
         fullSync={fullSync}
         syncCVEs={syncCVEs}
       />
-
-      {/* Delete Modal (if you want to keep it) */}
-      {showDeleteModal && (
-        <div className="bg-opacity-50 fixed inset-0 z-50 flex items-center justify-center bg-black">
-          <div className="rounded-lg bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-semibold">Delete Tenant</h3>
-            <p className="mt-2 text-gray-600">
-              Are you sure you want to delete "{showDeleteModal.name}"?
-            </p>
-            <div className="mt-4 flex space-x-3">
-              <button
-                onClick={() => setShowDeleteModal(null)}
-                className="rounded bg-gray-200 px-4 py-2 text-gray-800 hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  // Add delete logic here
-                  console.log("Delete tenant:", showDeleteModal);
-                  setShowDeleteModal(null);
-                }}
-                className="rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

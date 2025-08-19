@@ -13,6 +13,7 @@ const tabs = [
   { key: "compliance" as AdminTab, label: "Compliance", icon: "✅" },
   { key: "tenants" as AdminTab, label: "Tenants", icon: "🏢" },
   { key: "sentinelone" as AdminTab, label: "SentinelOne", icon: "🔗" },
+  { key: "d9apps" as AdminTab, label: "D9 Apps", icon: "📱" },
 ];
 
 export function AdminDashboardNavigation({

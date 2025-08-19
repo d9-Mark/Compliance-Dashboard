@@ -1,4 +1,4 @@
-// components/admin/tabs/SentinelOneTab.tsx
+// Create src/app/_components/admin/tabs/SentinelOneTab.tsx
 import { MetricCard } from "../ui/MetricCard";
 import { StatGrid } from "../ui/StatGrid";
 import { ActionButton } from "../ui/ActionButton";

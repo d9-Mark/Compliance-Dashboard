@@ -1,4 +1,4 @@
-// components/admin/ui/ActionButton.tsx
+// Create src/app/_components/admin/ui/ActionButton.tsx
 interface ActionButtonProps {
   children: React.ReactNode;
   onClick: () => void;

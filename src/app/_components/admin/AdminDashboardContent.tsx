@@ -1,4 +1,4 @@
-// components/admin/AdminDashboardContent.tsx
+// Replace src/app/_components/admin/AdminDashboardContent.tsx
 import type { AdminTab } from "~/hooks/admin/useAdminDashboard";
 import { OverviewTab } from "./tabs/OverviewTab";
 import { SecurityTab } from "./tabs/SecurityTab";
@@ -6,10 +6,10 @@ import { VulnerabilitiesTab } from "./tabs/VulnerabilitiesTab";
 import { ComplianceTab } from "./tabs/ComplianceTab";
 import { TenantsTab } from "./tabs/TenantsTab";
 import { SentinelOneTab } from "./tabs/SentinelOneTab";
+import { D9AppManagementPanel } from "./D9AppManagement";
 
 interface AdminDashboardContentProps {
   activeTab: AdminTab;
-  // You'll pass the necessary data props here
   globalMetrics: any;
   cveStats: any;
   selectedTenantId: string | null;
@@ -58,6 +58,7 @@ export function AdminDashboardContent({
             selectedTenantId={selectedTenantId}
             overview={overview}
             cveAvailable={cveAvailable}
+            tenantData={tenantData}
             onTenantSelect={onTenantSelect}
           />
         );
@@ -104,6 +105,8 @@ export function AdminDashboardContent({
             isSyncing={isSyncing}
           />
         );
+      case "d9apps":
+        return <D9AppManagementPanel />;
       default:
         return <div>Tab not found</div>;
     }
