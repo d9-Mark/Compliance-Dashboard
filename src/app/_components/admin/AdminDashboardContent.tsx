@@ -21,6 +21,12 @@ interface AdminDashboardContentProps {
   tenantsLoading: boolean;
   testingConnection: boolean;
   isSyncing: boolean;
+  // Enhanced error handling props
+  hasErrors?: boolean;
+  isLoadingAny?: boolean;
+  tenantsError?: any;
+  cveStatsError?: any;
+  diagnosticsError?: any;
   // Actions
   onTenantSelect: (tenantId: string) => void;
   onDeleteClick: (tenant: any) => void;
@@ -42,6 +48,11 @@ export function AdminDashboardContent({
   tenantsLoading,
   testingConnection,
   isSyncing,
+  hasErrors = false,
+  isLoadingAny = false,
+  tenantsError,
+  cveStatsError,
+  diagnosticsError,
   onTenantSelect,
   onDeleteClick,
   testConnection,
@@ -60,6 +71,10 @@ export function AdminDashboardContent({
             cveAvailable={cveAvailable}
             tenantData={tenantData}
             onTenantSelect={onTenantSelect}
+            hasErrors={hasErrors}
+            isLoadingAny={isLoadingAny}
+            tenantsError={tenantsError}
+            cveStatsError={cveStatsError}
           />
         );
       case "security":

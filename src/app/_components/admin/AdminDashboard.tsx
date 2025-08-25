@@ -34,13 +34,20 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
     testingConnection,
     isSyncing,
 
+    // Enhanced error handling
+    hasErrors,
+    isLoadingAny,
+    tenantsError,
+    cveStatsError,
+    diagnosticsError,
+
     // Actions
     testConnection,
     fullSync,
     syncCVEs,
   } = useAdminDashboard(session);
 
-  if (tenantsLoading) {
+  if (tenantsLoading && !tenantData) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <LoadingSpinner size="lg" message="Loading dashboard..." />
@@ -56,7 +63,7 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
         onTabChange={setActiveTab}
       />
 
-      {/* RE-ENABLE CONTENT */}
+      {/* Enhanced content with error handling */}
       <AdminDashboardContent
         activeTab={activeTab}
         globalMetrics={globalMetrics}
@@ -70,6 +77,11 @@ export function AdminDashboard({ session }: AdminDashboardProps) {
         tenantsLoading={tenantsLoading}
         testingConnection={testingConnection}
         isSyncing={isSyncing}
+        hasErrors={hasErrors}
+        isLoadingAny={isLoadingAny}
+        tenantsError={tenantsError}
+        cveStatsError={cveStatsError}
+        diagnosticsError={diagnosticsError}
         onTenantSelect={setSelectedTenantId}
         onDeleteClick={setShowDeleteModal}
         testConnection={testConnection}
